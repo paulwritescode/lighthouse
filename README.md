@@ -38,6 +38,17 @@ go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
 
 `go install` downloads the Lighthouse module and its dependencies, builds the `lighthouse` command for your machine, and places it in Go's binary directory. It does not install Go, configure a startup service, or start the dashboard. You do not need Git, a source checkout, Node.js, Python, a separate SQLite installation, or a database server.
 
+### Homebrew on macOS
+
+Homebrew can install the same tagged CLI release. Add this repository as a tap using its Git URL, then install the formula:
+
+```sh
+brew tap paulwritescode/lighthouse https://github.com/paulwritescode/lighthouse.git
+brew install paulwritescode/lighthouse/lighthouse
+```
+
+Homebrew builds the pinned release with Go and manages the installed executable. Use `brew upgrade paulwritescode/lighthouse/lighthouse` for later formula updates. If you installed a startup service, run `lighthouse service restart` after upgrading so it uses the new binary.
+
 ### Prerequisites
 
 - **Go 1.27 or newer.** Check with `go version`. If `go` is missing, install it from [go.dev/dl](https://go.dev/dl/) and open a new terminal.
