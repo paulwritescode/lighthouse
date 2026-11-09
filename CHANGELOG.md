@@ -2,10 +2,14 @@
 
 ## Unreleased
 
+## 0.4.0 — 2026-11-10
+
 ### Added
 
 - Add an interactive terminal control menu and OS-native per-user startup services for macOS, Linux, and Windows.
 - Add CLI setup and removal for the local `lighthouse` hosts-file entry, plus service start, stop, restart, and force-stop controls.
+- Add a one-question-at-a-time first-run setup wizard before the control menu.
+- Adapt CLI colors for light and dark terminals while keeping Lighthouse's blue selection and action accents.
 
 ### Fixed
 

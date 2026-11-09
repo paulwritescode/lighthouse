@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -53,13 +54,7 @@ var menuItems = []item{
 var (
 	brand         = lipgloss.Color("#252525")
 	blue          = lipgloss.Color("#88CDF1")
-	muted         = lipgloss.Color("#71605B")
-	line          = lipgloss.Color("#D8D5D1")
 	selectedStyle = lipgloss.NewStyle().Foreground(brand).Background(blue).Bold(true).Padding(0, 1)
-	sectionStyle  = lipgloss.NewStyle().Foreground(muted).Bold(true).MarginTop(1)
-	detailStyle   = lipgloss.NewStyle().Foreground(muted)
-	dangerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#B42318")).Bold(true)
-	logoStyle     = lipgloss.NewStyle().Foreground(brand).Bold(true)
 	keyStyle      = lipgloss.NewStyle().Foreground(brand).Background(blue).Bold(true).Padding(0, 1)
 )
 
@@ -73,10 +68,11 @@ type model struct {
 	updateMessage string
 	serviceOn     bool
 	hostnameOn    bool
+	isDark        bool
 }
 
 func Run(version string, serviceInstalled, hostnameRegistered bool) (Action, error) {
-	p := tea.NewProgram(model{width: 80, height: 24, version: version, serviceOn: serviceInstalled, hostnameOn: hostnameRegistered, updateMessage: "Checking GitHub releases…"})
+	p := tea.NewProgram(model{width: 80, height: 24, version: version, serviceOn: serviceInstalled, hostnameOn: hostnameRegistered, isDark: true, updateMessage: "Checking GitHub releases…"})
 	m, err := p.Run()
 	if err != nil {
 		return "", err
@@ -97,10 +93,11 @@ type releaseCheckMsg struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return func() tea.Msg {
+	checkRelease := func() tea.Msg {
 		release, err := updater.Latest(context.Background())
 		return releaseCheckMsg{version: release.TagName, err: err}
 	}
+	return tea.Batch(tea.RequestBackgroundColor, checkRelease)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -108,6 +105,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+	case tea.BackgroundColorMsg:
+		m.isDark = msg.IsDark()
 	case releaseCheckMsg:
 		if msg.err != nil {
 			m.updateMessage = "Release check unavailable · press C to retry"
@@ -156,6 +155,11 @@ func (m model) View() tea.View {
 		width = 88
 	}
 	compact := m.height < 28
+	logoStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true)
+	sectionStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0")).Bold(true).MarginTop(1)
+	detailStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0"))
+	dangerStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#B42318", "#F07373")).Bold(true)
+	lineStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#D8D5D1", "#747780"))
 	var b strings.Builder
 	b.WriteString(logoStyle.Render("◆  LIGHTHOUSE") + "  " + detailStyle.Render("v"+strings.TrimPrefix(m.version, "v")) + "\n")
 	startupState, hostState := "not installed", "not registered"
@@ -167,9 +171,9 @@ func (m model) View() tea.View {
 	}
 	b.WriteString(detailStyle.Render("Startup service: "+startupState+"  ·  Local hostname: "+hostState) + "\n")
 	b.WriteString(detailStyle.Render(m.updateMessage) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(line).Render(strings.Repeat("─", width-4)) + "\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
 	if !compact {
-		b.WriteString(lipgloss.NewStyle().Foreground(brand).Bold(true).Render("Your local memory, at your command.") + "\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true).Render("Your local memory, at your command.") + "\n")
 		b.WriteString(detailStyle.Render("Choose an action. System changes always ask before they’re applied.") + "\n")
 	}
 	lastSection := ""
@@ -198,7 +202,11 @@ func (m model) View() tea.View {
 			b.WriteString("    " + detailStyle.Render(row.detail) + "\n")
 		}
 	}
-	b.WriteString("\n" + lipgloss.NewStyle().Foreground(line).Render(strings.Repeat("─", width-4)) + "\n")
+	b.WriteString("\n" + lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
 	b.WriteString(keyStyle.Render("↑ ↓") + " move  " + keyStyle.Render("enter") + " choose  " + keyStyle.Render("c") + " check  " + keyStyle.Render("q") + " quit")
 	return tea.NewView(lipgloss.NewStyle().Padding(1, 2).Width(width).Render(b.String()))
+}
+
+func adaptiveColor(isDark bool, light, dark string) color.Color {
+	return lipgloss.LightDark(isDark)(lipgloss.Color(light), lipgloss.Color(dark))
 }
