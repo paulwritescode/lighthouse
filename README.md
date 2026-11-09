@@ -40,15 +40,13 @@ go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
 
 ### Homebrew on macOS
 
-Homebrew can install the same tagged CLI release. Add this repository as a tap using its Git URL, then install the formula:
+On macOS, Homebrew can install the same tagged CLI release in one command from the [Lighthouse tap](https://github.com/paulwritescode/homebrew-lighthouse):
 
 ```sh
-brew tap paulwritescode/lighthouse https://github.com/paulwritescode/lighthouse.git
-brew trust --formula paulwritescode/lighthouse/lighthouse
 brew install paulwritescode/lighthouse/lighthouse
 ```
 
-The trust command permits this formula to run during installation without trusting every formula in the tap. Homebrew builds the pinned release with Go and manages the installed executable. Use `brew upgrade paulwritescode/lighthouse/lighthouse` for later formula updates. If you installed a startup service, run `lighthouse service restart` after upgrading so it uses the new binary.
+Homebrew adds the tap and trusts this formula during installation, builds the pinned release with Go, and manages the installed executable. The shorter `brew install lighthouse` selects an unrelated Ethereum client from Homebrew Core. Use `brew upgrade paulwritescode/lighthouse/lighthouse` for later formula updates. If you installed a startup service, run `lighthouse service restart` after upgrading so it uses the new binary.
 
 ### Prerequisites
 
