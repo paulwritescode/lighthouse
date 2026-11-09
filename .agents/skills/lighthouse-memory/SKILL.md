@@ -5,7 +5,7 @@ description: Load, search, and update local Lighthouse context from Codex, Claud
 
 # Lighthouse local context
 
-Use the installed `lighthouse` CLI through the agent's local command runner. It talks directly to the local SQLite file; the dashboard does not need to run and is an optional visual workspace for review and data management.
+Use the installed `lighthouse` CLI through the agent's local command runner. If it is missing and Go 1.27 or newer is available, install it with `go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest`; see [the setup guide](https://github.com/paulwritescode/lighthouse/blob/main/docs/agent-integration.md). Check that `GOBIN` or `GOPATH/bin` is on `PATH`. It talks directly to the local SQLite file; the dashboard does not need to run and is an optional visual workspace for review and data management. If installation fails, continue without Lighthouse and never switch to MCP.
 
 At the beginning of substantive coding work, load one compact context pack:
 

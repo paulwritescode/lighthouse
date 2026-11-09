@@ -27,12 +27,12 @@ An embedded language runtime is a policy boundary, not a substitute for resource
 - Validate `Host` against loopback/Lighthouse hostnames to reduce DNS-rebinding and cross-origin local access risks. Do not enable permissive CORS.
 - Cap multipart import size, derive format from an allowlisted extension, ignore uploaded paths, and write only to generated temporary files.
 - Serve local static assets; no third-party analytics, fonts, or scripts. Keep stored text escaped by `html/template`.
-- Export is a read operation. Import, edit, and delete are audited. Artifact content/custom-field changes, memory changes, imports, deletes, and scope moves are marked as sensitive review events.
+- Export is a read operation. Import, edit, and delete are audited. Artifact content/custom-field changes, memory changes, imports, deletes, and scope moves are marked as sensitive review events. Bulk actions require selected IDs or an explicit all-matching filter; bulk delete also requires confirmation.
 - Provide a visible local-only security summary and an audit trail. A loopback dashboard is not authentication: any local process with browser access can potentially interact with it.
 
 ## Database safety
 
-- Use transactions for multi-row writes and memory revision changes.
+- Use transactions for each record write and memory revision change. Dashboard bulk operations commit and audit each item independently; the response reports any partial completion if an item fails.
 - Keep writes short; do not hold a transaction open while generating embeddings or waiting on a model.
 - Use the selected engine's backup/checkpoint APIs for consistent backups.
 - Run schema migrations before serving requests; preserve a backup before destructive migrations.

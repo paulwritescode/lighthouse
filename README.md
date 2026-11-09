@@ -28,15 +28,65 @@ A local CLI invocation and SQLite read/write do not themselves consume model cre
 
 These are architectural tradeoffs, not a portable performance benchmark: cold start and compilation vary by machine, toolchain, and packaging. The operation itself is a short local database access. The existing Go binary plus embedded Starlark is the simplest measured-to-implement choice; use a prebuilt Go executable for distribution rather than compiling a new helper on every agent turn.
 
-## Build and run
+## Install the CLI
 
 ```sh
-go build -o "$HOME/.local/bin/lighthouse" ./cmd/lighthouse
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
 lighthouse init
 lighthouse serve --port 8080
 ```
 
+To pin a release, install `@v0.3.0`. The Go tool places the executable in `GOBIN`, or in `$(go env GOPATH)/bin` when `GOBIN` is not set; make sure that directory is on `PATH`. Go 1.27 or newer is required by this release. The [agent installation guide](docs/agent-integration.md) covers the Codex and Claude Code skill setup after the CLI is installed.
+
+`go get` is for adding Lighthouse as a dependency to a Go module; use `go install` to install the CLI executable.
+
+## Use Lighthouse as a Go library
+
+The module also exposes a public Go package for applications that want direct database CRUD without starting the HTTP dashboard or invoking a subprocess:
+
+```sh
+go get github.com/paulwritescode/lighthouse@v0.3.0
+```
+
+```go
+import (
+    "context"
+    "log"
+
+    "github.com/paulwritescode/lighthouse"
+)
+
+func main() {
+ctx := context.Background()
+db, err := lighthouse.Open("./agent-results.db")
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+
+saved, err := db.CreateArtifact(ctx, lighthouse.ArtifactInput{
+    Title: "Build result",
+    Content: "The local build completed.",
+    Project: "example-project",
+    Agent: "codex",
+    Kind: "result",
+    Fields: map[string]any{"exit_code": 0},
+})
+if err != nil {
+    log.Fatal(err)
+}
+}
+```
+
+The package exports artifact and memory create, read/search/list, update, and delete methods, context loading, counts, and audit access. It stores flexible document properties in JSON fields and owns its SQLite schema; callers should use the public API rather than writing SQL to Lighthouse tables. See [the library package docs](https://pkg.go.dev/github.com/paulwritescode/lighthouse).
+
+Use `lighthouse.OpenDefault()` to open the same database used by the CLI and dashboard, or pass an application-specific SQLite file to `lighthouse.Open(path)`.
+
+## Run the dashboard
+
 The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. It uses Go templates, CSS, and native HTML forms—no React, HTMX, Node runtime, or browser JavaScript bundle. The overview shows record counts, seven-day activity, security status, and the current SQLite footprint: database file plus active `-wal` file. Transient shared-memory and unrelated filesystem allocation are excluded.
+
+The Results and Memory screens support individual CRUD, manually selected batches, and all records matching the active filters. Bulk result edits can set project, kind, or agent; bulk memory edits can set project or kind. The Results screen links to batch import. Bulk deletes require confirmation; bulk writes are audited per record and capped at 10,000 records. The tables show the newest 50 results and 100 memory items; “select every matching” applies the filters to the full set up to the cap.
 
 Dashboard mutations require a same-origin form and CSRF token, and changes are audited. Agent CLI operations work while the dashboard is stopped. Lighthouse does not install a startup daemon automatically; run `lighthouse serve` manually or configure your preferred local service manager.
 
@@ -57,6 +107,7 @@ Lighthouse uses SQLite through the CGo-free `modernc.org/sqlite` driver, with FT
 
 ## Project documentation
 
+- [Current release notes — v0.3.0](docs/releases/v0.3.0.md)
 - [Product brief](docs/00-product-brief.md)
 - [Architecture and runtime choice](docs/01-architecture.md)
 - [Data model and search](docs/02-data-model-and-search.md)

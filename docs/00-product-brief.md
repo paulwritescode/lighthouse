@@ -30,7 +30,7 @@ Lighthouse keeps complete source records on the local machine and prepares a sma
 3. Create a session context snapshot from selected memory items and source excerpts.
 4. Execute a short multi-step code call that can read and write through a limited Lighthouse API.
 5. Return an updated snapshot revision and a compact context patch after a memory-changing write.
-6. Inspect metrics, search and browse records, and manage records through a locally served dashboard protected by same-origin and CSRF checks.
+6. Inspect metrics, search and browse records, and create, edit, or delete individual or selected batches through a locally served dashboard protected by same-origin and CSRF checks.
 7. Export and back up the database in a documented, portable way.
 
 ## Product boundaries

@@ -150,3 +150,21 @@
 **Reason:** WAL contains committed changes until checkpointed, so main-file-only size can under-report the current on-disk database footprint. Transient `-shm` and filesystem allocation overhead are excluded.
 
 **Status:** Implemented in dashboard overview.
+
+### D-014 — Publish a Go library and installable CLI from the canonical module path
+
+**Decision:** Use `github.com/paulwritescode/lighthouse` as the Go module path, expose a small public library API at the module root, and keep the CLI in `cmd/lighthouse` for `go install`.
+
+**Reason:** Go users should be able to add Lighthouse with `go get` and call supported CRUD/context operations as a library, while agents and operators can install the standalone CLI without cloning the repository.
+
+**Status:** Implemented; CLI installation and library import are documented.
+
+### D-015 — Bulk dashboard CRUD uses explicit selection or filters
+
+**Decision:** Keep individual edit/delete controls and add selected-row and all-matching batch updates/deletes for results and memory. Import remains the batch-create path.
+
+**Reason:** Operators can change one item, a chosen set, or a filtered set without introducing a client-side framework or raw SQL controls.
+
+**Limit:** Bulk operations require POST + CSRF; deletes need an additional confirmation; each item is independently audited and batches cap at 10,000 records. A failure can leave earlier items committed and reports the completed count.
+
+**Status:** Implemented in the server-rendered dashboard.

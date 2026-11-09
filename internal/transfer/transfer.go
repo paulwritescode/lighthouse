@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulkinyatti/lighthouse/internal/store"
+	"github.com/paulwritescode/lighthouse/internal/store"
 	"gopkg.in/yaml.v3"
 )
 

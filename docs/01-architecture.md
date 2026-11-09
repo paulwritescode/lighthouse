@@ -34,6 +34,7 @@ Both entry points use the same validated store operations. The code-call CLI rem
 - Interactivity: ordinary HTML forms, POST mutations, and server-rendered inline SVG. No JavaScript framework is shipped.
 - Assets: compile/embed CSS and templates into the executable. No Node runtime in production.
 - Code calls: a constrained Starlark runtime is the primary agent data interface; see [code call and memory lifecycle](03-code-call-and-memory.md).
+- Go integrations: the root module exposes a small typed API over the internal store. Import it as a library or install the independent CLI from `cmd/lighthouse`.
 
 ### Runtime choice for local agent calls
 

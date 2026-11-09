@@ -4,14 +4,13 @@ Lighthouse calls are local CLI processes. This keeps the agent connection direct
 
 ## 1. Install the command
 
-From the Lighthouse checkout:
+Install the published executable with Go:
 
 ```sh
-mkdir -p "$HOME/.local/bin"
-go build -o "$HOME/.local/bin/lighthouse" ./cmd/lighthouse
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
 ```
 
-Confirm `~/.local/bin` is on `PATH`, then run:
+To pin the current release, use `@v0.3.0`. Go installs the binary to `GOBIN` or `$(go env GOPATH)/bin`; add that directory to `PATH`. Lighthouse requires Go 1.27 or newer for installation. Confirm the CLI is available:
 
 ```sh
 lighthouse code --help
@@ -19,21 +18,24 @@ lighthouse code --help
 
 The default SQLite file is under the OS application config directory. `LIGHTHOUSE_DB` or `--db` can select a different file.
 
+The Go library is available from `github.com/paulwritescode/lighthouse`. Add it to a Go module with `go get github.com/paulwritescode/lighthouse@v0.3.0`, then use `lighthouse.OpenDefault()` to share the CLI's database or `lighthouse.Open(path)` for a separate SQLite file. `go get` adds a library dependency; `go install` installs the CLI.
+
 ## 2. Install the agent skill for all projects
 
-Codex discovers user skills from `~/.agents/skills`; Claude Code uses `~/.claude/skills`. Copy the bundled skill into each profile:
+Codex discovers user skills from `~/.agents/skills`; Claude Code uses `~/.claude/skills`. If you cloned the repository, copy the bundled skill files. If you installed only the CLI, download the versioned skills directly:
 
 ```sh
 mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills"
-cp -R .agents/skills/lighthouse-memory "$HOME/.agents/skills/"
-cp -R .claude/skills/lighthouse-memory "$HOME/.claude/skills/"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.agents/skills/lighthouse-memory/SKILL.md -o "$HOME/.agents/skills/lighthouse-memory/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.claude/skills/lighthouse-memory/SKILL.md -o "$HOME/.claude/skills/lighthouse-memory/SKILL.md"
 ```
 
 Add the included user-profile instructions so the agent knows to load context at the start of project work. Append each block once; if the destination already has other instructions, keep them and add this block at the end:
 
 ```sh
-cat integrations/user-profile/codex-AGENTS.md >> "$HOME/.codex/AGENTS.md"
-cat integrations/user-profile/claude-CLAUDE.md >> "$HOME/.claude/CLAUDE.md"
+mkdir -p "$HOME/.codex" "$HOME/.claude"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/codex-AGENTS.md >> "$HOME/.codex/AGENTS.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/claude-CLAUDE.md >> "$HOME/.claude/CLAUDE.md"
 ```
 
 For repository-only setup, the project already contains both skill folders plus `AGENTS.md` and `CLAUDE.md`.

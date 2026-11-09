@@ -13,14 +13,15 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/paulkinyatti/lighthouse/internal/store"
-	"github.com/paulkinyatti/lighthouse/internal/transfer"
+	"github.com/paulwritescode/lighthouse/internal/store"
+	"github.com/paulwritescode/lighthouse/internal/transfer"
 )
 
 //go:embed templates/*.html static/* static/fonts/*
@@ -54,6 +55,8 @@ type pageData struct {
 	SecurityStatus string
 	FieldsJSON     string
 	Notice         string
+	SelectAll      bool
+	BulkAll        bool
 }
 
 func New(s *store.Store, dbPath string) (*Server, error) {
@@ -87,9 +90,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /artifacts", s.createArtifact)
 	mux.HandleFunc("POST /artifacts/{id}/update", s.updateArtifact)
 	mux.HandleFunc("POST /artifacts/{id}/delete", s.deleteArtifact)
+	mux.HandleFunc("POST /artifacts/bulk", s.bulkArtifacts)
 	mux.HandleFunc("POST /memory", s.createMemory)
 	mux.HandleFunc("POST /memory/{id}/update", s.updateMemory)
 	mux.HandleFunc("POST /memory/{id}/delete", s.deleteMemory)
+	mux.HandleFunc("POST /memory/bulk", s.bulkMemory)
 	mux.HandleFunc("POST /import", s.importData)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(mustSub(assets, "static"))))
@@ -160,7 +165,7 @@ func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	items, err := s.store.Search(r.Context(), q, project, 50)
-	d := pageData{Page: "library", Title: "Library", Query: q, Project: project, Artifacts: items, DBPath: s.dbPath}
+	d := pageData{Page: "library", Title: "Library", Query: q, Project: project, Artifacts: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
 	d.Counts, _ = s.store.Counts(r.Context())
 	d.Notice = r.URL.Query().Get("notice")
 	if err != nil {
@@ -183,7 +188,7 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	items, err := s.store.ListMemory(r.Context(), project, 100)
-	d := pageData{Page: "memory", Title: "Memory", Project: project, Memories: items, DBPath: s.dbPath}
+	d := pageData{Page: "memory", Title: "Memory", Project: project, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
 	d.Counts, _ = s.store.Counts(r.Context())
 	if err != nil {
 		d.Error = err.Error()
@@ -249,7 +254,7 @@ func (s *Server) redirectNotice(w http.ResponseWriter, r *http.Request, path, me
 	http.Redirect(w, r, path+"?notice="+urlQuery(message), http.StatusSeeOther)
 }
 func urlQuery(v string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(v, " ", "+"), "&", "%26")
+	return url.QueryEscape(v)
 }
 func (s *Server) requireConfirm(r *http.Request) error {
 	if r.FormValue("confirm") != "yes" {
@@ -318,6 +323,144 @@ func (s *Server) deleteArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.redirectNotice(w, r, "/artifacts", "Result deleted")
+}
+
+func (s *Server) bulkArtifacts(w http.ResponseWriter, r *http.Request) {
+	ids := uniqueIDs(r.PostForm["ids"])
+	if r.FormValue("all_matching") == "yes" {
+		var err error
+		ids, err = s.store.ArtifactIDs(r.Context(), r.FormValue("query"), r.FormValue("project_filter"))
+		if err != nil {
+			http.Error(w, "could not select matching results", http.StatusInternalServerError)
+			return
+		}
+	}
+	if len(ids) == 0 || len(ids) > 10000 {
+		http.Error(w, "select between 1 and 10,000 results; narrow the filter for a larger set", http.StatusBadRequest)
+		return
+	}
+	if r.FormValue("action") == "delete" {
+		if err := s.requireConfirm(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		deleted := 0
+		for _, id := range ids {
+			if err := s.store.DeleteArtifact(r.Context(), id, "dashboard"); err != nil {
+				s.redirectNotice(w, r, "/artifacts", fmt.Sprintf("Deleted %d results; stopped at an error: %s", deleted, err))
+				return
+			}
+			deleted++
+		}
+		s.redirectNotice(w, r, "/artifacts", fmt.Sprintf("Deleted %d results", deleted))
+		return
+	}
+	if r.FormValue("action") != "update" {
+		http.Error(w, "choose update or delete", http.StatusBadRequest)
+		return
+	}
+	patch := map[string]any{}
+	if r.FormValue("update_project") == "yes" {
+		patch["project"] = r.FormValue("project")
+	}
+	if r.FormValue("update_kind") == "yes" {
+		patch["kind"] = r.FormValue("kind")
+	}
+	if r.FormValue("update_agent") == "yes" {
+		patch["agent"] = r.FormValue("agent")
+	}
+	if len(patch) == 0 {
+		http.Error(w, "select at least one shared field to update", http.StatusBadRequest)
+		return
+	}
+	updated := 0
+	for _, id := range ids {
+		if _, err := s.store.UpdateArtifact(r.Context(), id, patch, "dashboard"); err != nil {
+			s.redirectNotice(w, r, "/artifacts", fmt.Sprintf("Updated %d results; stopped at an error: %s", updated, err))
+			return
+		}
+		updated++
+	}
+	s.redirectNotice(w, r, "/artifacts", fmt.Sprintf("Updated %d results", updated))
+}
+
+func (s *Server) bulkMemory(w http.ResponseWriter, r *http.Request) {
+	ids := uniqueIDs(r.PostForm["ids"])
+	if r.FormValue("all_matching") == "yes" {
+		var err error
+		ids, err = s.store.MemoryIDs(r.Context(), r.FormValue("project_filter"))
+		if err != nil {
+			http.Error(w, "could not select matching memory", http.StatusInternalServerError)
+			return
+		}
+	}
+	if len(ids) == 0 || len(ids) > 10000 {
+		http.Error(w, "select between 1 and 10,000 memory items; narrow the filter for a larger set", http.StatusBadRequest)
+		return
+	}
+	if r.FormValue("action") == "delete" {
+		if err := s.requireConfirm(r); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		deleted := 0
+		for _, id := range ids {
+			if err := s.store.DeleteMemory(r.Context(), id, "dashboard"); err != nil {
+				s.redirectNotice(w, r, "/memory", fmt.Sprintf("Deleted %d memory items; stopped at an error: %s", deleted, err))
+				return
+			}
+			deleted++
+		}
+		s.redirectNotice(w, r, "/memory", fmt.Sprintf("Deleted %d memory items", deleted))
+		return
+	}
+	if r.FormValue("action") != "update" {
+		http.Error(w, "choose update or delete", http.StatusBadRequest)
+		return
+	}
+	updateProject, updateKind := r.FormValue("update_project") == "yes", r.FormValue("update_kind") == "yes"
+	if !updateProject && !updateKind {
+		http.Error(w, "select project or kind to update", http.StatusBadRequest)
+		return
+	}
+	updated := 0
+	for _, id := range ids {
+		item, err := s.store.GetMemory(r.Context(), id)
+		if err != nil {
+			s.redirectNotice(w, r, "/memory", fmt.Sprintf("Updated %d memory items; one selected item is no longer available", updated))
+			return
+		}
+		project, kind := item.Project, item.Kind
+		if updateProject {
+			project = r.FormValue("project")
+		}
+		if updateKind {
+			kind = r.FormValue("kind")
+		}
+		if err := s.store.UpdateMemory(r.Context(), item.ID, item.Key, item.Body, project, kind, item.SourceID, "dashboard"); err != nil {
+			s.redirectNotice(w, r, "/memory", fmt.Sprintf("Updated %d memory items; stopped at an error: %s", updated, err))
+			return
+		}
+		updated++
+	}
+	s.redirectNotice(w, r, "/memory", fmt.Sprintf("Updated %d memory items", updated))
+}
+
+func uniqueIDs(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	ids := make([]string, 0, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
 }
 func (s *Server) newMemory(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, pageData{Page: "new-memory", Title: "New memory", DBPath: s.dbPath})

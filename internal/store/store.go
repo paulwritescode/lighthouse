@@ -559,8 +559,60 @@ ORDER BY a.created_at DESC LIMIT ?`, phrase, project, project, limit)
 		}
 	}
 	// Invalid FTS syntax or a query with punctuation still gets a safe literal fallback.
-	like := "%" + strings.ReplaceAll(query, "%", "\\%") + "%"
+	like := literalLikePattern(query)
 	return s.listLike(ctx, like, project, limit)
+}
+
+// ArtifactIDs returns IDs matching the same project and full-text filters as
+// Search. It intentionally omits document bodies for dashboard bulk actions.
+func (s *Store) ArtifactIDs(ctx context.Context, query, project string) ([]string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return s.artifactIDsLike(ctx, "", project)
+	}
+	phrase := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM artifacts_fts f JOIN artifacts a ON a.id=f.artifact_id WHERE artifacts_fts MATCH ? AND (?='' OR a.project=?) ORDER BY a.created_at DESC`, phrase, project, project)
+	if err == nil {
+		ids, scanErr := scanIDs(rows)
+		_ = rows.Close()
+		if scanErr == nil {
+			return ids, nil
+		}
+	}
+	like := literalLikePattern(query)
+	return s.artifactIDsLike(ctx, like, project)
+}
+
+func (s *Store) artifactIDsLike(ctx context.Context, query, project string) ([]string, error) {
+	var rows *sql.Rows
+	var err error
+	if query == "" {
+		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE (?='' OR project=?) ORDER BY created_at DESC`, project, project)
+	} else {
+		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=?) ORDER BY created_at DESC`, query, query, query, project, project)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIDs(rows)
+}
+
+func literalLikePattern(query string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(query)
+	return "%" + escaped + "%"
+}
+
+func scanIDs(rows *sql.Rows) ([]string, error) {
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (s *Store) list(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
@@ -573,7 +625,7 @@ func (s *Store) list(ctx context.Context, query, project string, limit int) ([]A
 }
 
 func (s *Store) listLike(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,created_at FROM artifacts WHERE (title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' OR metadata_json LIKE ? ESCAPE '\\') AND (?='' OR project=?) ORDER BY created_at DESC LIMIT ?`, query, query, query, project, project, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,created_at FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=?) ORDER BY created_at DESC LIMIT ?`, query, query, query, project, project, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -719,6 +771,33 @@ func (s *Store) ListMemory(ctx context.Context, project string, limit int) ([]Me
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) GetMemory(ctx context.Context, id string) (Memory, error) {
+	var m Memory
+	var created, updated string
+	err := s.db.QueryRowContext(ctx, `SELECT id,memory_key,body,scope_key,kind,source_id,revision,created_at,updated_at FROM memory_items WHERE id=? AND status='active'`, id).
+		Scan(&m.ID, &m.Key, &m.Body, &m.Project, &m.Kind, &m.SourceID, &m.Revision, &created, &updated)
+	if err != nil {
+		return Memory{}, err
+	}
+	m.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		return Memory{}, err
+	}
+	m.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
+	return m, err
+}
+
+// MemoryIDs returns IDs for active memory items matching a project filter.
+// An empty filter includes all scopes; a project filter includes global items.
+func (s *Store) MemoryIDs(ctx context.Context, project string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM memory_items WHERE status='active' AND (?='' OR scope_key='' OR scope_key=?) ORDER BY updated_at DESC`, project, project)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanIDs(rows)
 }
 
 func (s *Store) UpdateMemory(ctx context.Context, id, key, body, project, kind, sourceID, actor string) error {

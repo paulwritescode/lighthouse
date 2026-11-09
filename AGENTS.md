@@ -2,6 +2,8 @@
 
 Lighthouse is the primary local interface for agent context, retrieval, and writes. Use its CLI from the coding agent's local command runner. Do not add MCP for Lighthouse.
 
+If the `lighthouse` CLI is missing and Go 1.27 or newer is installed, follow [the agent installation guide](docs/agent-integration.md) and install it with `go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest`; ensure `GOBIN` or `GOPATH/bin` is on `PATH`. If installation is unavailable, continue without Lighthouse and do not add MCP.
+
 At the beginning of a substantive task in this repository, make one bootstrap call and reuse that context in the conversation:
 
 ```sh

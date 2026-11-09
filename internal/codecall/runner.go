@@ -9,7 +9,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/paulkinyatti/lighthouse/internal/store"
+	"github.com/paulwritescode/lighthouse/internal/store"
 	"go.starlark.net/starlark"
 )
 

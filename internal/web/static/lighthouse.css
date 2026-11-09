@@ -239,6 +239,18 @@ td small { display: block; max-width: 30rem; margin-top: .25rem; color: #777; fo
 .mini-editor textarea { min-height: 6rem; resize: vertical; }
 .mini-editor .button { justify-self: start; }
 .memory-delete { margin-top: .75rem; padding-top: .75rem; border-top: 1px solid #eee; }
+.selection-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem 1.2rem; margin: 1.2rem 0 .7rem; padding: .75rem 0; border-top: 1px solid var(--line); color: #666; font-size: .78rem; }
+.selection-bar a { color: #111; font-weight: 650; }
+.bulk-scope { margin: .5rem 0; padding: .65rem .8rem; border-left: 2px solid #111; background: var(--soft-2); font-size: .8rem; }
+.bulk-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin-bottom: 1rem; padding: 1rem; border: 1px solid var(--line); background: #fafafa; }
+.bulk-toolbar fieldset { display: flex; flex: 1 1 35rem; flex-wrap: wrap; gap: .55rem 1rem; min-width: 15rem; margin: 0; padding: .5rem .75rem .75rem; border: 1px solid #ddd; }
+.bulk-toolbar legend { padding-inline: .25rem; color: #555; font-size: .7rem; font-weight: 650; }
+.bulk-toolbar fieldset label { display: flex; flex: 1 1 12rem; align-items: center; gap: .4rem; font-size: .74rem; }
+.bulk-toolbar fieldset input:not([type=checkbox]) { width: min(11rem, 50%); min-height: 2.35rem; padding: .4rem .5rem; border: 1px solid #aaa; border-radius: 2px; font: inherit; }
+.bulk-toolbar .confirm-delete { min-height: 2.85rem; }
+.memory-select { display: flex; align-items: center; gap: .55rem; }
+.memory-select input, .bulk-toolbar input[type=checkbox], .table-wrap input[type=checkbox] { accent-color: #111; }
+.memory-select input { width: 1rem; height: 1rem; }
 .editor-form { max-width: 54rem; padding: 1.4rem; border: 1px solid var(--line); border-radius: 4px; }
 .editor-form .form-actions { margin-top: .4rem; }
 .footer-inner span:first-child { color: #555; }
@@ -257,6 +269,9 @@ td small { display: block; max-width: 30rem; margin-top: .25rem; color: #777; fo
   .detail-toolbar { align-items: start; flex-direction: column; }
   .panel-heading { align-items: start; }
   th,td { padding-inline: .65rem; }
+  .bulk-toolbar { align-items: stretch; padding: .8rem; }
+  .bulk-toolbar fieldset { flex-basis: 100%; min-width: 0; }
+  .bulk-toolbar > .button, .bulk-toolbar > .text-link { justify-content: center; }
 }
 
 /* Final overview and motion refinements. */

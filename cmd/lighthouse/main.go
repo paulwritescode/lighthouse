@@ -10,14 +10,14 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/paulkinyatti/lighthouse/internal/codecall"
-	"github.com/paulkinyatti/lighthouse/internal/store"
-	"github.com/paulkinyatti/lighthouse/internal/transfer"
-	"github.com/paulkinyatti/lighthouse/internal/web"
+	"github.com/paulwritescode/lighthouse"
+	"github.com/paulwritescode/lighthouse/internal/codecall"
+	"github.com/paulwritescode/lighthouse/internal/store"
+	"github.com/paulwritescode/lighthouse/internal/transfer"
+	"github.com/paulwritescode/lighthouse/internal/web"
 )
 
 func main() {
@@ -53,14 +53,11 @@ func run(args []string) error {
 		commandArgs = append(commandArgs, args[i])
 	}
 	if path == "" {
-		path = os.Getenv("LIGHTHOUSE_DB")
-	}
-	if path == "" {
-		base, err := os.UserConfigDir()
+		var err error
+		path, err = lighthouse.DefaultDatabasePath()
 		if err != nil {
-			return err
+			return fmt.Errorf("choose database path: %w", err)
 		}
-		path = filepath.Join(base, "lighthouse", "lighthouse.db")
 	}
 	s, err := store.Open(path)
 	if err != nil {

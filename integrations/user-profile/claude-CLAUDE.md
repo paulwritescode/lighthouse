@@ -1,5 +1,7 @@
 ## Lighthouse local memory
 
+If `lighthouse` is missing and Go 1.27 or newer is available, install the CLI with `go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest`, then make sure `GOBIN` or `GOPATH/bin` is on `PATH`. If installation cannot complete, continue without Lighthouse and never add MCP as a fallback.
+
 For a substantive coding or project task, if `lighthouse` is installed and local commands are available, load one compact context pack at the beginning:
 
 ```sh

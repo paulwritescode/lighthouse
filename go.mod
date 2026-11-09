@@ -1,4 +1,4 @@
-module github.com/paulkinyatti/lighthouse
+module github.com/paulwritescode/lighthouse
 
 go 1.27.0
 
