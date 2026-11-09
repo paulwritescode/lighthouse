@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.2 — 2026-11-10
+
+### Fixed
+
+- Accept local dashboard form submissions from browsers that send `Origin: null` when the host-only CSRF cookie and hidden token both match. Bulk deletion and other protected forms now work in those browsers while foreign origins and invalid tokens remain blocked.
+- Parse explicit origins as HTTP URLs and require an exact host match.
+
 ## 0.4.1 — 2026-11-10
 
 ### Changed

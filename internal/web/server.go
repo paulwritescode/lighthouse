@@ -301,9 +301,14 @@ func (s *Server) validMutation(r *http.Request) bool {
 		return false
 	}
 	origin := r.Header.Get("Origin")
-	if origin != "" && !strings.EqualFold(strings.TrimPrefix(strings.TrimPrefix(origin, "http://"), "https://"), r.Host) {
-		return false
+	if origin != "" && origin != "null" {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Scheme != "http" || !strings.EqualFold(parsed.Host, r.Host) || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return false
+		}
 	}
+	// Sandboxed browsers can send Origin: null for a local form. The host-only
+	// cookie and random hidden token were both verified above.
 	return true
 }
 
