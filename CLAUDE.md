@@ -1,0 +1,3 @@
+# Lighthouse agent workflow
+
+For Lighthouse context and data, follow the local CLI workflow in [AGENTS.md](AGENTS.md). Use one `lighthouse code` bootstrap at the start of substantive project work, keep that context in the conversation, and use the constrained code call as the primary data interface. Do not add MCP. The dashboard is an optional visual workspace with protected edit, delete, import, and export forms. Inspect fields before editing, use JSON custom fields instead of SQL schema changes, and review `audit()` for sensitive writes. Use deletes only when the user's task explicitly calls for deletion; apply the refreshed context patch after each write.

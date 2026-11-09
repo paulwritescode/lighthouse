@@ -1,0 +1,12 @@
+# Build output
+/lighthouse
+/dist/
+
+# Local SQLite database and sidecar files
+*.db
+*.db-shm
+*.db-wal
+
+# Go workspace files
+/go.work
+/go.work.sum

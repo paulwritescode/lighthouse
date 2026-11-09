@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{.Title}} · Lighthouse</title>
+  <link rel="stylesheet" href="/static/lighthouse.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar"><div class="shell topbar-inner">
+    <a class="wordmark" href="/" aria-label="Lighthouse overview">lighthouse<span class="wordmark-dot">.</span></a>
+    <nav class="nav" aria-label="Main navigation">
+      <a href="/" {{if eq .Page "home"}}aria-current="page"{{end}}>Overview</a>
+      <a href="/artifacts" {{if or (eq .Page "library") (eq .Page "artifact") (eq .Page "new-artifact") (eq .Page "edit-artifact")}}aria-current="page"{{end}}>Results</a>
+      <a href="/memory" {{if or (eq .Page "memory") (eq .Page "new-memory")}}aria-current="page"{{end}}>Memory</a>
+      <a href="/#data-tools">Data tools</a>
+    </nav>
+  </div></header>
+
+  <main id="main" class="shell main">
+    {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+    {{if eq .Page "home"}}
+      <div class="page-heading"><div><h1>Overview</h1><p class="lede">A live snapshot of what Lighthouse has saved for you and your agents.</p></div><span class="status-pill"><i></i>Local database active</span></div>
+      <section class="metrics" aria-label="Lighthouse metrics">
+        <article class="metric"><strong>{{.Counts.Artifacts}}</strong><span>Results saved</span></article>
+        <article class="metric"><strong>{{.Counts.Memories}}</strong><span>Memory items</span></article>
+        <article class="metric"><strong>{{.Counts.Projects}}</strong><span>Projects</span></article>
+        <article class="metric"><strong>{{.Counts.AddedThisWeek}}</strong><span>Changes · 7 days</span></article>
+        <article class="metric metric-storage"><strong>{{.DBTotalSize}}</strong><span>Database size</span><small>File {{.DBSize}} · WAL {{.DBWALSize}}</small></article>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="panel chart-panel" aria-labelledby="activity-heading">
+          <div class="panel-heading"><div><p class="eyebrow">DATABASE ACTIVITY</p><h2 id="activity-heading">Recent changes</h2></div><span class="panel-stat">{{.Counts.Changes}} total events</span></div>
+          <div class="chart-frame"><svg viewBox="0 0 480 110" role="img" aria-label="Database changes over the last seven days" class="activity-chart"><path class="chart-grid" d="M18 14H462 M18 41H462 M18 68H462 M18 95H462"/><path class="chart-line" d="{{range $i, $p := .Activity}}{{if $i}}L{{else}}M{{end}}{{$p.X}} {{$p.Y}} {{end}}"/>{{range .Activity}}<circle class="chart-dot" cx="{{.X}}" cy="{{.Y}}" r="3.5"><title>{{.Label}}: {{.Count}} changes</title></circle>{{end}}</svg></div>
+          <div class="chart-labels">{{range .Activity}}<span>{{.Label}} <b>{{.Count}}</b></span>{{end}}</div>
+          <p class="chart-caption">Fine-line activity view inspired by Hairline figures. Each event is recorded locally; sensitive actions are marked in the audit log.</p>
+        </section>
+        <section class="panel security-panel" aria-labelledby="security-heading">
+          <div class="panel-heading"><div><p class="eyebrow">SECURITY</p><h2 id="security-heading">Local safeguards</h2></div><span class="status-pill"><i></i>Protected</span></div>
+          <ul class="security-list"><li><span>Network access</span><b>Loopback only</b></li><li><span>Dashboard writes</span><b>Same-origin + CSRF</b></li><li><span>Audit events</span><b>{{.Counts.Changes}} recorded</b></li><li><span>Flagged sensitive edits</span><b>{{.Counts.SecurityFlags}}</b></li></ul>
+          <p class="field-help">{{.SecurityStatus}}. Deletes and scope changes are highlighted in the audit trail.</p>
+        </section>
+      </div>
+
+      <section class="panel table-panel" aria-labelledby="recent-heading">
+        <div class="panel-heading"><div><p class="eyebrow">LATEST STORED</p><h2 id="recent-heading">Recent results</h2></div><a class="text-link" href="/artifacts">View library →</a></div>
+        {{if .Artifacts}}<div class="table-wrap"><table><thead><tr><th>Result</th><th>Kind</th><th>Project</th><th>Agent</th><th>Saved</th></tr></thead><tbody>{{range .Artifacts}}<tr><td><a class="table-title" href="/artifacts/{{.ID}}">{{.Title}}</a><small>{{short .Content 100}}</small></td><td><span class="record-kind">{{.Kind}}</span></td><td>{{if .Project}}{{.Project}}{{else}}<span class="muted">Global</span>{{end}}</td><td>{{.Agent}}</td><td>{{date .CreatedAt}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty-state"><h3>No results saved yet</h3><p>Ask an agent to save a result through the local code call, or create one here.</p><a class="button" href="/artifacts/new">Add a result</a></div>{{end}}
+      </section>
+
+      <section class="panel table-panel" id="data-tools" aria-labelledby="data-tools-heading">
+        <div class="panel-heading"><div><p class="eyebrow">PORTABILITY</p><h2 id="data-tools-heading">Import and export</h2><p class="section-description">Move a portable data set, or save a full SQLite snapshot.</p></div></div>
+        <div class="data-tools-grid"><form action="/export" method="get" class="inline-tool"><label for="export-format">Export data</label><select id="export-format" name="format"><option value="json">JSON</option><option value="md">Markdown</option><option value="yaml">YAML</option><option value="toml">TOML</option><option value="pdf">PDF report</option><option value="db">SQLite database (.db)</option></select><button class="button button-secondary" type="submit">Download export</button><small>Exports include stored results and active memory. PDF is a readable report; use a data format for round-trip imports.</small></form>
+          <form action="/import" method="post" enctype="multipart/form-data" class="inline-tool"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><label for="import-file">Import data</label><input type="file" id="import-file" name="file" accept=".json,.md,.yaml,.yml,.toml,.pdf,.db" required><button class="button" type="submit">Import file</button><small>Imports merge records into this database. A duplicate stable ID or memory key is skipped.</small></form></div>
+      </section>
+      <section class="panel table-panel" aria-labelledby="audit-heading"><div class="panel-heading"><div><p class="eyebrow">CHANGE HISTORY</p><h2 id="audit-heading">Audit trail</h2></div></div>{{if .Changes}}<div class="table-wrap"><table><thead><tr><th>Change</th><th>Actor</th><th>Project</th><th>Revision</th><th>When</th><th>Review</th></tr></thead><tbody>{{range .Changes}}<tr><td>{{.Summary}}</td><td>{{.Actor}}</td><td>{{if .Scope}}{{.Scope}}{{else}}Global{{end}}</td><td>{{.Revision}}</td><td>{{date .CreatedAt}}</td><td>{{if .Sensitive}}<span class="flag-pill">Review sensitive</span>{{else}}<span class="muted">Routine</span>{{end}}</td></tr>{{end}}</tbody></table></div>{{else}}<p class="empty-inline">No changes recorded yet.</p>{{end}}</section>
+
+    {{else if eq .Page "library"}}
+      <div class="page-heading"><div><p class="eyebrow">AGENT DOCUMENTS</p><h1>Results</h1><p class="lede">Search, inspect, correct, and manage the documents saved by your agents.</p></div><a class="button" href="/artifacts/new">Add a result</a></div>
+      <form class="search" method="get" action="/artifacts"><div class="field search-field"><label for="search-query">Search documents</label><input id="search-query" name="q" value="{{.Query}}" placeholder="Search title, content, or custom fields"></div><div class="field search-field"><label for="search-project">Project</label><input id="search-project" name="project" value="{{.Project}}" placeholder="All projects"></div><button class="button search-button" type="submit">Search</button></form>
+      {{if .Artifacts}}<div class="table-wrap"><table><thead><tr><th>Result</th><th>Kind</th><th>Project</th><th>Agent</th><th>Saved</th><th>Fields</th></tr></thead><tbody>{{range .Artifacts}}<tr><td><a class="table-title" href="/artifacts/{{.ID}}">{{.Title}}</a><small>{{short .Content 130}}</small></td><td><span class="record-kind">{{.Kind}}</span></td><td>{{if .Project}}{{.Project}}{{else}}<span class="muted">Global</span>{{end}}</td><td>{{.Agent}}</td><td>{{date .CreatedAt}}</td><td>{{len .Fields}}</td></tr>{{end}}</tbody></table></div>{{else}}<div class="empty-state"><h2>No matching results</h2><p>Try a shorter search or clear the project filter.</p></div>{{end}}
+
+    {{else if eq .Page "artifact"}}
+      {{with .Artifact}}<div class="detail-heading"><a class="back-link" href="/artifacts">← Back to results</a><div class="detail-toolbar"><a class="button button-secondary" href="/artifacts/{{.ID}}/edit">Edit document</a><form action="/artifacts/{{.ID}}/delete" method="post" class="delete-form"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><label class="confirm-delete"><input type="checkbox" name="confirm" value="yes" required> Confirm delete</label><button class="button button-danger" type="submit">Delete</button></form></div><div class="record-meta detail-meta"><span>{{.Kind}}</span><span>{{date .CreatedAt}}</span><span>{{.Agent}}</span>{{if .Project}}<span>{{.Project}}</span>{{end}}</div><h1>{{.Title}}</h1></div><article class="detail-content">{{.Content}}</article>{{if .Fields}}<section class="panel fields-panel"><div class="panel-heading"><div><p class="eyebrow">FLEXIBLE DOCUMENT FIELDS</p><h2>Custom fields</h2></div></div><dl class="custom-fields">{{range $key,$value := .Fields}}<div><dt>{{$key}}</dt><dd>{{if eq $key "base64"}}Binary attachment stored (base64 encoded){{else}}{{$value}}{{end}}</dd></div>{{end}}</dl></section>{{end}}{{end}}
+
+    {{else if or (eq .Page "new-artifact") (eq .Page "edit-artifact")}}
+      <div class="form-page-heading"><a class="back-link" href="/artifacts">← Back to results</a><p class="eyebrow">DOCUMENT EDITOR</p><h1>{{if eq .Page "edit-artifact"}}Edit result{{else}}Add result{{end}}</h1><p class="lede">Core fields are indexed by Lighthouse. Add any extra JSON fields you need; they stay inside this document and do not require a schema migration.</p></div>
+      {{if .Artifact}}<form class="editor-form" action="/artifacts/{{.Artifact.ID}}/update" method="post">{{else}}<form class="editor-form" action="/artifacts" method="post">{{end}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field"><label for="title">Title <span class="required">Required</span></label><input id="title" name="title" required value="{{if .Artifact}}{{.Artifact.Title}}{{end}}"><p class="field-help">A short label that makes this result easy to retrieve later.</p></div>
+        <div class="field"><label for="content">Content <span class="required">Required</span></label><textarea id="content" name="content" required>{{if .Artifact}}{{.Artifact.Content}}{{end}}</textarea><p class="field-help">Keep source-backed output, notes, or decisions. Plain text is displayed safely.</p></div>
+        <div class="form-row"><div class="field"><label for="project">Project</label><input id="project" name="project" value="{{if .Artifact}}{{.Artifact.Project}}{{end}}"><p class="field-help">Use the same project key your agents use.</p></div><div class="field"><label for="kind">Kind</label><input id="kind" name="kind" value="{{if .Artifact}}{{.Artifact.Kind}}{{else}}result{{end}}"></div></div>
+        {{if .Artifact}}<div class="field"><label for="agent">Agent</label><input id="agent" name="agent" value="{{.Artifact.Agent}}"></div>{{end}}
+        <div class="field"><label for="fields">Custom fields <span class="optional">Optional JSON object</span></label><textarea id="fields" name="fields" class="json-editor" spellcheck="false">{{.FieldsJSON}}</textarea><p class="field-help">Example: <code>{"model":"claude-sonnet","confidence":0.92,"sources":["docs/a.md"]}</code>. Field names and JSON values are stored per document.</p></div>
+        <div class="form-actions"><button class="button" type="submit">{{if .Artifact}}Save changes{{else}}Create result{{end}}</button><a class="button button-secondary" href="/artifacts">Cancel</a></div>
+      </form>
+
+    {{else if eq .Page "memory"}}
+      <div class="page-heading"><div><p class="eyebrow">DURABLE CONTEXT</p><h1>Memory</h1><p class="lede">Facts and preferences your agents can reload when a new conversation starts.</p></div><a class="button" href="/memory/new">Add memory</a></div>
+      {{if .Memories}}<div class="memory-grid">{{range .Memories}}<article class="panel memory-card"><div class="record-heading"><h2>{{.Key}}</h2><span class="record-kind">{{.Kind}}</span></div><div class="record-meta">{{if .Project}}<span>{{.Project}}</span>{{else}}<span>Global</span>{{end}}<span>Revision {{.Revision}}</span></div><p class="memory-body">{{.Body}}</p>{{if .SourceID}}<p class="field-help">Source record: {{.SourceID}}</p>{{end}}<details class="memory-edit"><summary>Edit memory</summary><form action="/memory/{{.ID}}/update" method="post" class="mini-editor"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><label>Key<input name="key" value="{{.Key}}" required></label><label>Body<textarea name="body" required>{{.Body}}</textarea></label><div class="form-row"><label>Project<input name="project" value="{{.Project}}"></label><label>Kind<input name="kind" value="{{.Kind}}"></label></div><label>Source ID<input name="source_id" value="{{.SourceID}}"></label><button class="button button-secondary" type="submit">Save memory</button></form></details><form action="/memory/{{.ID}}/delete" method="post" class="delete-form memory-delete"><input type="hidden" name="csrf_token" value="{{$.CSRF}}"><label class="confirm-delete"><input type="checkbox" name="confirm" value="yes" required> Confirm delete</label><button class="button button-danger" type="submit">Delete</button></form></article>{{end}}</div>{{else}}<div class="empty-state"><h2>No memory items yet</h2><p>Save a concise, durable preference, project rule, or workflow detail.</p><a class="button" href="/memory/new">Add memory</a></div>{{end}}
+
+    {{else if eq .Page "new-memory"}}
+      <div class="form-page-heading"><a class="back-link" href="/memory">← Back to memory</a><p class="eyebrow">DURABLE CONTEXT</p><h1>Add memory</h1><p class="lede">Store one useful fact or preference agents can reload in future conversations.</p></div><form class="editor-form" action="/memory" method="post"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><div class="field"><label for="key">Memory key</label><input id="key" name="key" required placeholder="e.g. project.lighthouse.workflow"><p class="field-help">A stable unique key within its project scope. Reusing it updates the same memory.</p></div><div class="field"><label for="body">Memory text</label><textarea id="body" name="body" required></textarea><p class="field-help">Write a concise fact that remains useful across chats.</p></div><div class="form-row"><div class="field"><label for="project">Project</label><input id="project" name="project"></div><div class="field"><label for="kind">Kind</label><input id="kind" name="kind" value="fact"></div></div><div class="field"><label for="source_id">Source result ID <span class="optional">Optional</span></label><input id="source_id" name="source_id"></div><div class="form-actions"><button class="button" type="submit">Save memory</button><a class="button button-secondary" href="/memory">Cancel</a></div></form>
+    {{end}}
+  </main>
+  <footer class="footer"><div class="shell footer-inner"><span>Agent-first · Local editable data</span><span>SQLite · {{.DBPath}}</span></div></footer>
+</body>
+</html>
