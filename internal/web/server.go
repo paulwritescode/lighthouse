@@ -60,6 +60,14 @@ type pageData struct {
 }
 
 func New(s *store.Store, dbPath string) (*Server, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("find Lighthouse config directory: %w", err)
+	}
+	return newWithCSRFPath(s, dbPath, filepath.Join(configDir, "lighthouse", "csrf-token"))
+}
+
+func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
 	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "short": func(v string, n int) string {
 		if len(v) <= n {
 			return v
@@ -70,11 +78,60 @@ func New(s *store.Store, dbPath string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	var token [32]byte
-	if _, err := rand.Read(token[:]); err != nil {
+	token, err := loadCSRFToken(csrfPath)
+	if err != nil {
 		return nil, err
 	}
-	return &Server{store: s, dbPath: dbPath, csrf: hex.EncodeToString(token[:]), tmpl: t}, nil
+	return &Server{store: s, dbPath: dbPath, csrf: token, tmpl: t}, nil
+}
+
+func loadCSRFToken(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if len(data) != 64 {
+			return "", fmt.Errorf("invalid Lighthouse CSRF token file %q", path)
+		}
+		if _, err := hex.DecodeString(string(data)); err != nil {
+			return "", fmt.Errorf("invalid Lighthouse CSRF token file %q: %w", path, err)
+		}
+		if err := os.Chmod(path, 0o600); err != nil {
+			return "", fmt.Errorf("secure Lighthouse CSRF token file: %w", err)
+		}
+		return string(data), nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("read Lighthouse CSRF token: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", fmt.Errorf("create Lighthouse config directory: %w", err)
+	}
+	var token [32]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return "", fmt.Errorf("generate Lighthouse CSRF token: %w", err)
+	}
+	value := hex.EncodeToString(token[:])
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if os.IsExist(err) {
+		return loadCSRFToken(path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("create Lighthouse CSRF token: %w", err)
+	}
+	if _, err := file.WriteString(value); err != nil {
+		file.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("write Lighthouse CSRF token: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		os.Remove(path)
+		return "", fmt.Errorf("sync Lighthouse CSRF token: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return "", fmt.Errorf("close Lighthouse CSRF token: %w", err)
+	}
+	return value, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -216,7 +273,7 @@ func (s *Server) localOnly(next http.Handler) http.Handler {
 				return
 			}
 			if !s.validMutation(r) {
-				http.Error(w, "Request rejected: Lighthouse requires a same-origin form with a valid CSRF token.", http.StatusForbidden)
+				http.Error(w, "Request rejected: Lighthouse requires a same-origin form with a valid CSRF token. Refresh the page and try again.", http.StatusForbidden)
 				return
 			}
 		}

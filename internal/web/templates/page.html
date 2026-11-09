@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <title>{{.Title}} · Lighthouse</title>
+  <link rel="icon" type="image/png" sizes="512x512" media="(prefers-color-scheme: light)" href="/static/light-house-icon.png">
+  <link rel="icon" type="image/png" sizes="512x512" media="(prefers-color-scheme: dark)" href="/static/light-house-white-icon.png">
   <link rel="stylesheet" href="/static/lighthouse.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="topbar"><div class="shell topbar-inner">
-    <a class="wordmark" href="/" aria-label="Lighthouse overview">lighthouse<span class="wordmark-dot">.</span></a>
+    <a class="wordmark" href="/" aria-label="Lighthouse overview"><img class="wordmark-logo" src="/static/light-house.png" alt="">lighthouse</a>
     <nav class="nav" aria-label="Main navigation">
       <a href="/" {{if eq .Page "home"}}aria-current="page"{{end}}>Overview</a>
       <a href="/artifacts" {{if or (eq .Page "library") (eq .Page "artifact") (eq .Page "new-artifact") (eq .Page "edit-artifact")}}aria-current="page"{{end}}>Results</a>

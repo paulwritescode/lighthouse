@@ -10,7 +10,7 @@ Install the `lighthouse` executable and the agent skill. Start substantive work 
 lighthouse code --project my-project < examples/bootstrap.star
 ```
 
-The code API includes `load_memory`, `search`, `get`, `describe`, `audit`, `save`, `update`, `delete`, `upsert_memory`, `delete_memory`, and `emit`. Documents accept flexible JSON custom fields without agent-controlled SQL schema changes. Deletions are explicit and audited. See [agent integration](docs/agent-integration.md), [code call and memory lifecycle](docs/03-code-call-and-memory.md), and [examples](examples/).
+The code API includes `load_memory`, `search`, `get`, `describe`, `audit`, `save`, `update`, `delete`, `upsert_memory`, `delete_memory`, and `emit`. Documents accept flexible JSON custom fields without agent-controlled SQL schema changes. Deletions are explicit and audited. See [Set up your coding agent](#set-up-your-coding-agent) and the [examples](examples/).
 
 ### Runtime, setup, and cost
 
@@ -30,15 +30,101 @@ These are architectural tradeoffs, not a portable performance benchmark: cold st
 
 ## Install the CLI
 
+Install the published command without cloning the repository:
+
 ```sh
 go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
-lighthouse init
-lighthouse serve --port 8080
 ```
 
-To pin a release, install `@v0.3.0`. The Go tool places the executable in `GOBIN`, or in `$(go env GOPATH)/bin` when `GOBIN` is not set; make sure that directory is on `PATH`. Go 1.27 or newer is required by this release. The [agent installation guide](docs/agent-integration.md) covers the Codex and Claude Code skill setup after the CLI is installed.
+`go install` downloads the Lighthouse module and its dependencies, builds the `lighthouse` command for your machine, and places it in Go's binary directory. It does not install Go, configure a startup service, or start the dashboard. You do not need Git, a source checkout, Node.js, Python, a separate SQLite installation, or a database server.
 
-`go get` is for adding Lighthouse as a dependency to a Go module; use `go install` to install the CLI executable.
+### Prerequisites
+
+- **Go 1.27 or newer.** Check with `go version`. If `go` is missing, install it from [go.dev/dl](https://go.dev/dl/) and open a new terminal.
+- **Internet access for the initial install.** Normal use of the installed CLI is local; Lighthouse does not send your database to a cloud service.
+- **Write access to Go's binary directory:** `GOBIN` if set, otherwise `$(go env GOPATH)/bin` (usually `~/go/bin`). No administrator privileges are needed for a per-user install.
+- **That directory on your `PATH`**, so you can type `lighthouse`.
+
+To pin a release for repeatable setups, replace `@latest` with a version:
+
+```sh
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.3.0
+```
+
+To test a pushed commit before it has a release, install it over the Lighthouse executable your shell currently uses. Replace the commit ID below with the commit you want to test:
+
+```sh
+GOBIN="$(dirname "$(command -v lighthouse)")" go install github.com/paulwritescode/lighthouse/cmd/lighthouse@17c717e
+```
+
+In PowerShell, set `$env:GOBIN = Split-Path (Get-Command lighthouse).Source`, then run the same `go install` command.
+
+If a startup service is already installed, restart it after a manual `go install` with `lighthouse service restart`. The built-in `lighthouse update` command installs into the directory of the running binary and handles stopping and restarting an installed service itself.
+
+### Put it on your PATH
+
+Check whether your shell can find the command:
+
+```sh
+command -v lighthouse
+```
+
+If that prints nothing, add Go's binary directory to `PATH`. On macOS and Linux with zsh, add this line to `~/.zshrc` (use your `GOBIN` value instead if you set one), then run `source ~/.zshrc`:
+
+```sh
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+For Bash, add the same line to `~/.bashrc` or `~/.bash_profile`. On Windows, add the directory printed by `go env GOBIN` (or `go env GOPATH` plus `\bin`) to your user `Path`, open a new PowerShell window, and check with `Get-Command lighthouse`.
+
+### Verify and initialize
+
+```sh
+lighthouse --help
+lighthouse init
+```
+
+`lighthouse init` creates the default local database and prints its path. Change the location with `LIGHTHOUSE_DB` or `--db /path/to/file.db`. Keep the live database out of synced folders and active Git checkouts.
+
+### Install from source (contributors)
+
+Only needed to modify Lighthouse or build the current checkout:
+
+```sh
+git clone https://github.com/paulwritescode/lighthouse.git
+cd lighthouse
+mkdir -p "$HOME/.local/bin"
+go build -o "$HOME/.local/bin/lighthouse" ./cmd/lighthouse
+```
+
+Put `~/.local/bin` on `PATH`, or run `go install ./cmd/lighthouse` from the repository root to use Go's standard binary directory.
+
+### Troubleshooting
+
+- **`go: command not found`:** install Go 1.27 or newer and open a new terminal.
+- **The module cannot be downloaded:** check internet access, and that any proxy or firewall allows your configured Go module proxy and source host.
+- **`lighthouse` not found after install:** check `go env GOBIN` and `go env GOPATH`, add the effective directory to `PATH`, and open a new terminal.
+- **An older version runs:** install the version you want explicitly, then use `command -v lighthouse` (or `Get-Command lighthouse`) to see which copy your shell runs.
+
+`go get` adds Lighthouse as a dependency to a Go module; use `go install` to install the CLI executable.
+
+## Set up your coding agent
+
+Installing the CLI is separate from installing agent instructions. Codex and Claude Code need the Lighthouse skill so they know when and how to call the CLI. Codex reads user skills from `~/.agents/skills` and Claude Code from `~/.claude/skills`.
+
+If you installed only the CLI, download the versioned skill and profile files:
+
+```sh
+mkdir -p "$HOME/.agents/skills/lighthouse-memory" "$HOME/.claude/skills/lighthouse-memory" "$HOME/.codex" "$HOME/.claude"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.agents/skills/lighthouse-memory/SKILL.md -o "$HOME/.agents/skills/lighthouse-memory/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.claude/skills/lighthouse-memory/SKILL.md -o "$HOME/.claude/skills/lighthouse-memory/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/codex-AGENTS.md >> "$HOME/.codex/AGENTS.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/claude-CLAUDE.md >> "$HOME/.claude/CLAUDE.md"
+```
+
+Append the profile files once; if the destination already has instructions, they are kept and the new block is added at the end. If you cloned the repository, copy `.agents/skills/lighthouse-memory` and `.claude/skills/lighthouse-memory` into those directories and append the files in `integrations/user-profile/` instead. For repository-only use, the project already contains both skill folders plus `AGENTS.md` and `CLAUDE.md`.
+
+The integration needs the agent session to be able to start a local executable. It is not a remote connector. The CLI never sends data to an AI provider; the agent sees only the stdout it requested.
 
 ## Use Lighthouse as a Go library
 
@@ -84,11 +170,41 @@ Use `lighthouse.OpenDefault()` to open the same database used by the CLI and das
 
 ## Run the dashboard
 
-The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. It uses Go templates, CSS, and native HTML forms—no React, HTMX, Node runtime, or browser JavaScript bundle. The overview shows record counts, seven-day activity, security status, and the current SQLite footprint: database file plus active `-wal` file. Transient shared-memory and unrelated filesystem allocation are excluded.
+The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. The CLI can also add a `lighthouse` entry to the local hosts file so you can use `http://lighthouse:8080`. It uses Go templates, CSS, and native HTML forms—no React, HTMX, Node runtime, or browser JavaScript bundle. The overview shows record counts, seven-day activity, security status, and the current SQLite footprint: database file plus active `-wal` file. Transient shared-memory and unrelated filesystem allocation are excluded.
 
 The Results and Memory screens support individual CRUD, manually selected batches, and all records matching the active filters. Bulk result edits can set project, kind, or agent; bulk memory edits can set project or kind. The Results screen links to batch import. Bulk deletes require confirmation; bulk writes are audited per record and capped at 10,000 records. The tables show the newest 50 results and 100 memory items; “select every matching” applies the filters to the full set up to the cap.
 
-Dashboard mutations require a same-origin form and CSRF token, and changes are audited. Agent CLI operations work while the dashboard is stopped. Lighthouse does not install a startup daemon automatically; run `lighthouse serve` manually or configure your preferred local service manager.
+Dashboard mutations require a same-origin form and CSRF token, and changes are audited. The CSRF key is stored with user-only permissions so restarting the dashboard during an update does not invalidate forms in open tabs. If a form is rejected, refresh that page and submit again. Agent CLI operations work while the dashboard is stopped.
+
+### Startup service and local hostname
+
+Run `lighthouse` to open the interactive control menu, or use the commands directly:
+
+```sh
+lighthouse service install
+lighthouse service status
+lighthouse service start
+lighthouse service stop
+lighthouse service restart
+lighthouse service force-stop
+lighthouse service remove
+```
+
+Install asks for confirmation, creates a per-user service that starts at sign-in, and starts it immediately. Remove asks for confirmation, stops Lighthouse, and removes the startup entry. The service uses the current database path and loopback-only dashboard. macOS uses a LaunchAgent in `~/Library/LaunchAgents`; Linux uses a systemd user unit in `~/.config/systemd/user`; Windows creates a Task Scheduler logon task for the current user. Linux installations need the user's systemd session available at sign-in. No administrator permission is needed for startup services.
+
+`force-stop` confirms before terminating the managed dashboard. macOS sends `SIGKILL`; systemd escalates a timed-out stop to `SIGKILL`; Windows ends the scheduled task instance. The service can be started again with `lighthouse service start`.
+
+Register the short local URL with a separate confirmation:
+
+```sh
+lighthouse host register
+lighthouse host status
+lighthouse host remove
+```
+
+Registration adds only a marked Lighthouse block to the OS hosts file. macOS and Linux ask for the administrator password through `sudo`; Windows shows its standard elevation prompt. Removal deletes only that marked block. You can always use `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080` without registering a hosts entry.
+
+`lighthouse update` installs the latest published release. When a startup service is installed, the CLI stops it before replacing the binary and starts it again afterward. If installation fails, it attempts to restart the previous version. Updating while a dashboard is running manually leaves that foreground process in place; stop it with Ctrl+C and start it again to load the new binary.
 
 The database defaults to the OS user configuration directory. Set `LIGHTHOUSE_DB` or pass `--db /path/to/file.db` to choose another file. Avoid placing a live database in a synced vault or active Git checkout.
 
@@ -103,17 +219,10 @@ Lighthouse uses SQLite through the CGo-free `modernc.org/sqlite` driver, with FT
 - The dashboard binds to loopback and validates allowed hostnames. Mutations use CSRF protection and audit events.
 - Starlark has bounded input, output, execution steps, and wall time, and exposes typed operations only. It does not have a hard memory limit; use trusted local scripts.
 - Local storage has no built-in encryption or multi-user authentication. Protect the user account and database file accordingly.
-- Vector query behavior, automated startup packaging, and broader platform distribution remain areas for further validation.
+- Semantic search requires embeddings to be supplied by the caller; Lighthouse does not generate or upload them automatically.
 
-## Project documentation
+## Documentation
 
-- [Current release notes — v0.3.0](docs/releases/v0.3.0.md)
-- [Product brief](docs/00-product-brief.md)
-- [Architecture and runtime choice](docs/01-architecture.md)
-- [Data model and search](docs/02-data-model-and-search.md)
-- [Code call and memory lifecycle](docs/03-code-call-and-memory.md)
-- [Dashboard visual specification](docs/04-dashboard-visual-spec.md)
-- [Security and operations](docs/05-security-and-operations.md)
-- [Decisions and roadmap](docs/06-decisions-and-roadmap.md)
-- [Agent integration setup](docs/agent-integration.md)
-- [Architecture diagram](docs/lighthouse-architecture-overview.drawio)
+The full documentation (installation, quickstart, agent setup, the code API, the dashboard, import and export, architecture, security, and why Lighthouse uses a code call instead of MCP) lives on the Lighthouse website. Its source is in [paulwritescode/lighthouse-website](https://github.com/paulwritescode/lighthouse-website).
+
+Release history is in [CHANGELOG.md](CHANGELOG.md). Runnable script samples are in [examples/](examples/).
