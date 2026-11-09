@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -36,6 +37,7 @@ func main() {
 }
 
 func run(args []string) error {
+	defaultLaunch := len(args) == 0
 	if len(args) == 0 {
 		args = []string{"menu"}
 	}
@@ -75,7 +77,19 @@ func run(args []string) error {
 		return updater.Update(context.Background(), path)
 	}
 	if command == "menu" {
+		if defaultLaunch {
+			complete, err := setupIsComplete()
+			if err != nil {
+				return err
+			}
+			if !complete {
+				return firstRunSetup(path)
+			}
+		}
 		return managementMenu(path)
+	}
+	if command == "setup" {
+		return firstRunSetup(path)
 	}
 	if command == "service" {
 		return serviceCommand(path, commandArgs)
@@ -114,7 +128,7 @@ func run(args []string) error {
 	}
 }
 
-const usageText = "Commands: menu, init, serve, service, host, add, search, context, code, export, import, version, update\nUse lighthouse <command> --help for command options. Running `lighthouse` opens the interactive menu."
+const usageText = "Commands: setup, menu, init, serve, service, host, add, search, context, code, export, import, version, update\nUse lighthouse <command> --help for command options. Running `lighthouse` opens first-time setup or the interactive menu."
 
 func usage() error { fmt.Println("Lighthouse — local agent knowledge\n\n" + usageText); return nil }
 
@@ -179,6 +193,90 @@ func managementMenu(dbPath string) error {
 	default:
 		return fmt.Errorf("service action %q is not yet available for this operating system", action)
 	}
+}
+
+func firstRunSetup(dbPath string) error {
+	options, finished, err := tui.RunSetup()
+	if err != nil {
+		return err
+	}
+	if !finished {
+		fmt.Println("Setup was not completed. Run `lighthouse setup` when you are ready.")
+		return nil
+	}
+
+	database, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("initialize the local database: %w", err)
+	}
+	if err := database.Close(); err != nil {
+		return fmt.Errorf("close the local database after setup: %w", err)
+	}
+
+	if options.RegisterHostname {
+		if err := hostname.Register(); err != nil {
+			if errors.Is(err, os.ErrPermission) || strings.Contains(err.Error(), "administrator permission") {
+				if err := hostname.Elevate(false); err != nil {
+					return fmt.Errorf("register the Lighthouse hostname: %w", err)
+				}
+			} else {
+				return fmt.Errorf("register the Lighthouse hostname: %w", err)
+			}
+		}
+	}
+
+	if options.InstallService {
+		manager, err := service.New("", dbPath)
+		if err != nil {
+			return err
+		}
+		if err := manager.Install(); err != nil {
+			return fmt.Errorf("install the startup service: %w", err)
+		}
+	}
+
+	if err := markSetupComplete(); err != nil {
+		return err
+	}
+	fmt.Println("Setup complete. Opening the Lighthouse menu…")
+	return managementMenu(dbPath)
+}
+
+func setupStatePath() (string, error) {
+	config, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("find Lighthouse configuration directory: %w", err)
+	}
+	return filepath.Join(config, "lighthouse", "setup-complete"), nil
+}
+
+func setupIsComplete() (bool, error) {
+	path, err := setupStatePath()
+	if err != nil {
+		return false, err
+	}
+	_, err = os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check Lighthouse setup status: %w", err)
+}
+
+func markSetupComplete() error {
+	path, err := setupStatePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("create Lighthouse configuration directory: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(updater.CurrentVersion()+"\n"), 0o600); err != nil {
+		return fmt.Errorf("save Lighthouse setup status: %w", err)
+	}
+	return nil
 }
 
 func runServiceAction(dbPath, action string) error {

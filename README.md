@@ -48,16 +48,10 @@ go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest
 To pin a release for repeatable setups, replace `@latest` with a version:
 
 ```sh
-go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.3.0
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.4.0
 ```
 
-To test a pushed commit before it has a release, install it over the Lighthouse executable your shell currently uses. Replace the commit ID below with the commit you want to test:
-
-```sh
-GOBIN="$(dirname "$(command -v lighthouse)")" go install github.com/paulwritescode/lighthouse/cmd/lighthouse@17c717e
-```
-
-In PowerShell, set `$env:GOBIN = Split-Path (Get-Command lighthouse).Source`, then run the same `go install` command.
+The first time you run `lighthouse`, an interactive setup guides you through the local hostname and optional sign-in service one question at a time. System-level changes are opt-in. After setup, running `lighthouse` opens the control menu. Run `lighthouse setup` to revisit the setup questions.
 
 If a startup service is already installed, restart it after a manual `go install` with `lighthouse service restart`. The built-in `lighthouse update` command installs into the directory of the running binary and handles stopping and restarting an installed service itself.
 
@@ -116,10 +110,10 @@ If you installed only the CLI, download the versioned skill and profile files:
 
 ```sh
 mkdir -p "$HOME/.agents/skills/lighthouse-memory" "$HOME/.claude/skills/lighthouse-memory" "$HOME/.codex" "$HOME/.claude"
-curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.agents/skills/lighthouse-memory/SKILL.md -o "$HOME/.agents/skills/lighthouse-memory/SKILL.md"
-curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/.claude/skills/lighthouse-memory/SKILL.md -o "$HOME/.claude/skills/lighthouse-memory/SKILL.md"
-curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/codex-AGENTS.md >> "$HOME/.codex/AGENTS.md"
-curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.3.0/integrations/user-profile/claude-CLAUDE.md >> "$HOME/.claude/CLAUDE.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.4.0/.agents/skills/lighthouse-memory/SKILL.md -o "$HOME/.agents/skills/lighthouse-memory/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.4.0/.claude/skills/lighthouse-memory/SKILL.md -o "$HOME/.claude/skills/lighthouse-memory/SKILL.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.4.0/integrations/user-profile/codex-AGENTS.md >> "$HOME/.codex/AGENTS.md"
+curl -fsSL https://raw.githubusercontent.com/paulwritescode/lighthouse/v0.4.0/integrations/user-profile/claude-CLAUDE.md >> "$HOME/.claude/CLAUDE.md"
 ```
 
 Append the profile files once; if the destination already has instructions, they are kept and the new block is added at the end. If you cloned the repository, copy `.agents/skills/lighthouse-memory` and `.claude/skills/lighthouse-memory` into those directories and append the files in `integrations/user-profile/` instead. For repository-only use, the project already contains both skill folders plus `AGENTS.md` and `CLAUDE.md`.
@@ -131,7 +125,7 @@ The integration needs the agent session to be able to start a local executable. 
 The module also exposes a public Go package for applications that want direct database CRUD without starting the HTTP dashboard or invoking a subprocess:
 
 ```sh
-go get github.com/paulwritescode/lighthouse@v0.3.0
+go get github.com/paulwritescode/lighthouse@v0.4.0
 ```
 
 ```go
