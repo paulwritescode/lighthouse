@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.1 — 2026-11-10
+
+### Changed
+
+- Open first-time setup directly on the local-address question, then ask about the startup service without extra welcome or completion screens.
+- Use a compact, colored setup prompt with quick `y` and `n` answers and an animated progress indicator while non-interactive setup work runs.
+- Show an animated release-check indicator and clearer blue, green, and red status cues in the control menu.
+
 ## 0.4.0 — 2026-11-10
 
 ### Added

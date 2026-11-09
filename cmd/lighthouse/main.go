@@ -205,12 +205,17 @@ func firstRunSetup(dbPath string) error {
 		return nil
 	}
 
-	database, err := store.Open(dbPath)
-	if err != nil {
-		return fmt.Errorf("initialize the local database: %w", err)
-	}
-	if err := database.Close(); err != nil {
-		return fmt.Errorf("close the local database after setup: %w", err)
+	if err := tui.RunProgress("Preparing local database", func() error {
+		database, err := store.Open(dbPath)
+		if err != nil {
+			return fmt.Errorf("initialize the local database: %w", err)
+		}
+		if err := database.Close(); err != nil {
+			return fmt.Errorf("close the local database after setup: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if options.RegisterHostname {
@@ -230,7 +235,7 @@ func firstRunSetup(dbPath string) error {
 		if err != nil {
 			return err
 		}
-		if err := manager.Install(); err != nil {
+		if err := tui.RunProgress("Installing startup service", manager.Install); err != nil {
 			return fmt.Errorf("install the startup service: %w", err)
 		}
 	}
@@ -238,7 +243,6 @@ func firstRunSetup(dbPath string) error {
 	if err := markSetupComplete(); err != nil {
 		return err
 	}
-	fmt.Println("Setup complete. Opening the Lighthouse menu…")
 	return managementMenu(dbPath)
 }
 

@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"strings"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/paulwritescode/lighthouse/internal/updater"
@@ -69,10 +70,12 @@ type model struct {
 	serviceOn     bool
 	hostnameOn    bool
 	isDark        bool
+	checking      bool
+	spinner       spinner.Model
 }
 
 func Run(version string, serviceInstalled, hostnameRegistered bool) (Action, error) {
-	p := tea.NewProgram(model{width: 80, height: 24, version: version, serviceOn: serviceInstalled, hostnameOn: hostnameRegistered, isDark: true, updateMessage: "Checking GitHub releases…"})
+	p := tea.NewProgram(model{width: 80, height: 24, version: version, serviceOn: serviceInstalled, hostnameOn: hostnameRegistered, isDark: true, checking: true, spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot)), updateMessage: "Checking GitHub releases…"})
 	m, err := p.Run()
 	if err != nil {
 		return "", err
@@ -97,7 +100,7 @@ func (m model) Init() tea.Cmd {
 		release, err := updater.Latest(context.Background())
 		return releaseCheckMsg{version: release.TagName, err: err}
 	}
-	return tea.Batch(tea.RequestBackgroundColor, checkRelease)
+	return tea.Batch(tea.RequestBackgroundColor, m.spinner.Tick, checkRelease)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -107,7 +110,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tea.BackgroundColorMsg:
 		m.isDark = msg.IsDark()
+	case spinner.TickMsg:
+		if !m.checking {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case releaseCheckMsg:
+		m.checking = false
 		if msg.err != nil {
 			m.updateMessage = "Release check unavailable · press C to retry"
 		} else {
@@ -137,6 +148,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = len(menuItems) - 1
 		case "c":
 			m.updateMessage = "Checking GitHub releases…"
+			m.checking = true
 			return m, m.Init()
 		case "enter":
 			m.chosen = menuItems[m.cursor].action
@@ -159,6 +171,8 @@ func (m model) View() tea.View {
 	sectionStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0")).Bold(true).MarginTop(1)
 	detailStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0"))
 	dangerStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#B42318", "#F07373")).Bold(true)
+	greenStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#167B4A", "#72D6A0"))
+	blueStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#176A93", "#88CDF1"))
 	lineStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#D8D5D1", "#747780"))
 	var b strings.Builder
 	b.WriteString(logoStyle.Render("◆  LIGHTHOUSE") + "  " + detailStyle.Render("v"+strings.TrimPrefix(m.version, "v")) + "\n")
@@ -169,8 +183,23 @@ func (m model) View() tea.View {
 	if m.hostnameOn {
 		hostState = "registered"
 	}
-	b.WriteString(detailStyle.Render("Startup service: "+startupState+"  ·  Local hostname: "+hostState) + "\n")
-	b.WriteString(detailStyle.Render(m.updateMessage) + "\n")
+	serviceStyle, hostStyle := detailStyle, detailStyle
+	if m.serviceOn {
+		serviceStyle = greenStyle
+	}
+	if m.hostnameOn {
+		hostStyle = greenStyle
+	}
+	b.WriteString(detailStyle.Render("Startup service: ") + serviceStyle.Render(startupState) + detailStyle.Render("  ·  Local hostname: ") + hostStyle.Render(hostState) + "\n")
+	if m.checking {
+		b.WriteString(blueStyle.Render(m.spinner.View()) + " " + detailStyle.Render(m.updateMessage) + "\n")
+	} else if strings.HasPrefix(m.updateMessage, "Release check unavailable") {
+		b.WriteString(dangerStyle.Render(m.updateMessage) + "\n")
+	} else if strings.HasPrefix(m.updateMessage, "Update available") {
+		b.WriteString(blueStyle.Render(m.updateMessage) + "\n")
+	} else {
+		b.WriteString(greenStyle.Render(m.updateMessage) + "\n")
+	}
 	b.WriteString(lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
 	if !compact {
 		b.WriteString(lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true).Render("Your local memory, at your command.") + "\n")

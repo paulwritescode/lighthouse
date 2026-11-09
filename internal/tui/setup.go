@@ -16,23 +16,20 @@ type SetupOptions struct {
 type setupStep int
 
 const (
-	setupWelcome setupStep = iota
-	setupHostname
+	setupHostname setupStep = iota
 	setupService
-	setupComplete
 )
 
 type setupModel struct {
 	step     setupStep
 	selected int
 	options  SetupOptions
-	width    int
 	isDark   bool
 	finished bool
 }
 
 func RunSetup() (SetupOptions, bool, error) {
-	program := tea.NewProgram(setupModel{width: 72, isDark: true})
+	program := tea.NewProgram(setupModel{step: setupHostname, selected: 1, isDark: true})
 	result, err := program.Run()
 	if err != nil {
 		return SetupOptions{}, false, err
@@ -48,93 +45,72 @@ func (m setupModel) Init() tea.Cmd { return tea.RequestBackgroundColor }
 
 func (m setupModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
-	case tea.WindowSizeMsg:
-		m.width = message.Width
 	case tea.BackgroundColorMsg:
 		m.isDark = message.IsDark()
 	case tea.KeyPressMsg:
 		switch message.String() {
 		case "ctrl+c", "esc", "q":
 			return m, tea.Quit
-		case "left", "h", "y":
-			if m.step == setupHostname || m.step == setupService {
-				m.selected = 0
-			}
-		case "right", "l", "n":
-			if m.step == setupHostname || m.step == setupService {
-				m.selected = 1
-			}
+		case "up", "left", "k", "h":
+			m.selected = 0
+		case "down", "right", "j", "l", "tab":
+			m.selected = 1
+		case "y":
+			m.selected = 0
+			return m.advance()
+		case "n":
+			m.selected = 1
+			return m.advance()
 		case "enter", " ":
-			switch m.step {
-			case setupWelcome:
-				m.step = setupHostname
-				m.selected = 1
-			case setupHostname:
-				m.options.RegisterHostname = m.selected == 0
-				m.step = setupService
-				m.selected = 1
-			case setupService:
-				m.options.InstallService = m.selected == 0
-				m.step = setupComplete
-			case setupComplete:
-				m.finished = true
-				return m, tea.Quit
-			}
+			return m.advance()
 		}
 	}
 	return m, nil
 }
 
-func (m setupModel) View() tea.View {
-	width := m.width
-	if width < 46 {
-		width = 46
+func (m setupModel) advance() (tea.Model, tea.Cmd) {
+	if m.step == setupHostname {
+		m.options.RegisterHostname = m.selected == 0
+		m.step = setupService
+		m.selected = 1
+		return m, nil
 	}
-	if width > 76 {
-		width = 76
-	}
-	frame := lipgloss.NewStyle().Padding(1, 2).Width(width)
-	line := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#D8D5D1", "#747780")).Render(strings.Repeat("─", width-4))
-	detailStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0"))
-	headingStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true)
-	var body strings.Builder
-	body.WriteString(headingStyle.Render("◆  LIGHTHOUSE") + "  " + detailStyle.Render("First-time setup") + "\n")
-	body.WriteString(line + "\n\n")
-	switch m.step {
-	case setupWelcome:
-		body.WriteString(headingStyle.Render("Let's set up Lighthouse.") + "\n\n")
-		body.WriteString("I'll ask one question at a time. Your database stays on this device.\n")
-		body.WriteString("You can change these choices later from the Lighthouse menu.\n\n")
-		body.WriteString(detailStyle.Render("Press enter to begin · q to quit"))
-	case setupHostname:
-		body.WriteString(detailStyle.Render("STEP 1 OF 2") + "\n\n")
-		body.WriteString(headingStyle.Render("Use the local address lighthouse?") + "\n\n")
-		body.WriteString("This adds a local hosts-file entry so you can use\nhttp://lighthouse:8080 instead of http://localhost:8080.\n")
-		body.WriteString("Choosing Yes will ask your operating system for permission.\n\n")
-		body.WriteString(setupChoices(m.selected) + "\n\n")
-		body.WriteString(detailStyle.Render("← → choose · enter continue · q quit"))
-	case setupService:
-		body.WriteString(detailStyle.Render("STEP 2 OF 2") + "\n\n")
-		body.WriteString(headingStyle.Render("Start Lighthouse when you sign in?") + "\n\n")
-		body.WriteString("This installs a per-user background service and starts it now.\n")
-		body.WriteString("You can stop, restart, or remove it later from the menu.\n\n")
-		body.WriteString(setupChoices(m.selected) + "\n\n")
-		body.WriteString(detailStyle.Render("← → choose · enter continue · q quit"))
-	case setupComplete:
-		body.WriteString(headingStyle.Render("Your local setup is ready.") + "\n\n")
-		body.WriteString("The Lighthouse menu will open next. Start the dashboard there\nwhenever you want to use it.\n\n")
-		body.WriteString(detailStyle.Render("Press enter to continue"))
-	}
-	body.WriteString("\n" + line)
-	return tea.NewView(frame.Render(body.String()))
+	m.options.InstallService = m.selected == 0
+	m.finished = true
+	return m, tea.Quit
 }
 
-func setupChoices(selected int) string {
-	yes, no := "  Yes  ", "  No  "
-	if selected == 0 {
-		yes = selectedStyle.Render("  Yes  ")
-	} else {
-		no = selectedStyle.Render("  No  ")
+func (m setupModel) View() tea.View {
+	blueStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#176A93", "#88CDF1")).Bold(true)
+	greenStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#167B4A", "#72D6A0")).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED"))
+	mutedStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0"))
+
+	step := "1/2"
+	question := "Register lighthouse as a local address?"
+	hint := "http://lighthouse:8080 · requires admin permission"
+	if m.step == setupService {
+		step = "2/2"
+		question = "Start Lighthouse when you sign in?"
+		hint = "Adds a user startup service · removable from the menu"
 	}
-	return yes + "   " + no
+
+	var body strings.Builder
+	body.WriteString(blueStyle.Render("◆ Lighthouse") + "  " + mutedStyle.Render("Setup "+step) + "\n\n")
+	body.WriteString(blueStyle.Render("?") + " " + textStyle.Bold(true).Render(question) + "\n")
+	body.WriteString("  " + mutedStyle.Render(hint) + "\n\n")
+	for i, choice := range []string{"Yes", "No"} {
+		if i == m.selected {
+			style := blueStyle
+			if i == 0 {
+				style = greenStyle
+			}
+			body.WriteString(style.Render("❯ " + choice))
+		} else {
+			body.WriteString(mutedStyle.Render("  " + choice))
+		}
+		body.WriteByte('\n')
+	}
+	body.WriteString("\n" + mutedStyle.Render("↑↓ select · enter confirm · y/n answer · q quit"))
+	return tea.NewView(body.String())
 }
