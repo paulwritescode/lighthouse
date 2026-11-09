@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -65,6 +66,13 @@ func Update(ctx context.Context, database string) error {
 	if err != nil {
 		return err
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find installed Lighthouse binary: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
 	restartService := manager.Installed()
 	if restartService {
 		if err := manager.Stop(); err != nil {
@@ -74,6 +82,7 @@ func Update(ctx context.Context, database string) error {
 	cmd := exec.CommandContext(ctx, goPath, "install", modulePath)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.Stdin = os.Stdin
+	cmd.Env = withGOBIN(os.Environ(), filepath.Dir(executable))
 	installErr := cmd.Run()
 	if restartService {
 		if err := manager.Start(); err != nil {
@@ -88,6 +97,25 @@ func Update(ctx context.Context, database string) error {
 		return fmt.Errorf("install latest Lighthouse: %w", installErr)
 	}
 	return nil
+}
+
+func withGOBIN(environment []string, directory string) []string {
+	result := make([]string, 0, len(environment)+1)
+	replaced := false
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "GOBIN=") {
+			if !replaced {
+				result = append(result, "GOBIN="+directory)
+				replaced = true
+			}
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !replaced {
+		result = append(result, "GOBIN="+directory)
+	}
+	return result
 }
 
 func IsNewer(current, latest string) bool {

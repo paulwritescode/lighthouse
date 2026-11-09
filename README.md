@@ -51,13 +51,15 @@ To pin a release for repeatable setups, replace `@latest` with a version:
 go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.3.0
 ```
 
-To test the pushed development branch before it has a release, install its branch query instead:
+To test the pushed development branch before it has a release, install it over the Lighthouse executable your shell currently uses:
 
 ```sh
-go install github.com/paulwritescode/lighthouse/cmd/lighthouse@codex/lighthouse-service-management
+GOBIN="$(dirname "$(command -v lighthouse)")" go install github.com/paulwritescode/lighthouse/cmd/lighthouse@codex/lighthouse-service-management
 ```
 
-If a startup service is already installed, restart it after a manual `go install` with `lighthouse service restart`. The built-in `lighthouse update` command handles stopping and restarting an installed service itself.
+In PowerShell, use `$env:GOBIN = Split-Path (Get-Command lighthouse).Source`, then run the same `go install` command.
+
+If a startup service is already installed, restart it after a manual `go install` with `lighthouse service restart`. The built-in `lighthouse update` command installs into the directory of the running binary and handles stopping and restarting an installed service itself.
 
 ### Put it on your PATH
 
