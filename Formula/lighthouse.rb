@@ -2,7 +2,7 @@ class Lighthouse < Formula
   desc "Local memory for coding agents"
   homepage "https://lighthouse.ovenplatform.com"
   url "https://github.com/paulwritescode/lighthouse.git",
-      tag: "v0.4.0",
+      tag:      "v0.4.0",
       revision: "61e65d600a9c4438ffb650ce876f576adba0621d"
   license "MIT"
 
