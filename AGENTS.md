@@ -2,7 +2,7 @@
 
 Lighthouse is the primary local interface for agent context, retrieval, and writes. Use its CLI from the coding agent's local command runner. Do not add MCP for Lighthouse.
 
-If the `lighthouse` CLI is missing and Go 1.27 or newer is installed, follow [the agent installation guide](docs/agent-integration.md) and install it with `go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest`; ensure `GOBIN` or `GOPATH/bin` is on `PATH`. If installation is unavailable, continue without Lighthouse and do not add MCP.
+If the `lighthouse` CLI is missing and Go 1.27 or newer is installed, follow [the install and agent setup sections of the README](README.md#install-the-cli) and install it with `go install github.com/paulwritescode/lighthouse/cmd/lighthouse@latest`; ensure `GOBIN` or `GOPATH/bin` is on `PATH`. If installation is unavailable, continue without Lighthouse and do not add MCP.
 
 At the beginning of a substantive task in this repository, make one bootstrap call and reuse that context in the conversation:
 
@@ -27,4 +27,4 @@ Use the local code call or CLI as the primary interface. The dashboard is an opt
 
 Use `lighthouse export --format json|md|yaml|toml|pdf|db` and `lighthouse import --format ...` for portable backups and interchange. PDF is a report; imported PDFs are retained as source attachments without text extraction. Dashboard imports are capped and merged, never used to replace the live database.
 
-See [docs/03-code-call-and-memory.md](docs/03-code-call-and-memory.md), [docs/05-security-and-operations.md](docs/05-security-and-operations.md), and [docs/agent-integration.md](docs/agent-integration.md) for the complete interface and security boundaries.
+See the [README](README.md) for installation, agent setup and security boundaries, and the project website documentation for the complete code API.

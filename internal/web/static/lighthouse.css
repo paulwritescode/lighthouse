@@ -44,8 +44,8 @@ button, .button { cursor: pointer; }
 .skip-link:focus { transform: translateY(0); }
 .topbar { height: 4.25rem; border-bottom: 1px solid var(--line); background: #fff; }
 .topbar-inner { display: flex; height: 100%; align-items: center; justify-content: space-between; gap: 2rem; }
-.wordmark { font: 700 1.35rem/1 Bricolage, system-ui, sans-serif; letter-spacing: -.045em; text-decoration: none; }
-.wordmark-dot { color: #777; }
+.wordmark { display: inline-flex; align-items: center; gap: .42em; font: 700 1.35rem/1 Bricolage, system-ui, sans-serif; letter-spacing: -.045em; text-decoration: none; }
+.wordmark-logo { display: block; width: 1.35rem; height: 2.15rem; flex: none; object-fit: contain; }
 .nav { display: flex; height: 100%; align-items: center; gap: clamp(1.15rem, 3vw, 2.25rem); }
 .nav a { display: inline-flex; height: 100%; align-items: center; border-bottom: 2px solid transparent; color: var(--muted); font-size: .9rem; text-decoration: none; transition: color .18s ease, border-color .18s ease; }
 .nav a:hover, .nav a[aria-current="page"] { color: var(--ink); }

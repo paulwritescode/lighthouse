@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Add an interactive terminal control menu and OS-native per-user startup services for macOS, Linux, and Windows.
+- Add CLI setup and removal for the local `lighthouse` hosts-file entry, plus service start, stop, restart, and force-stop controls.
+
+### Fixed
+
+- Keep the CSRF token stable across dashboard restarts so open forms remain valid during service updates.
+- Restart an installed dashboard service after updating its binary.
+
 ## 0.3.0 — 2026-11-09
 
 - Align the Go module path with the public GitHub repository and document versioned `go install` for the CLI.
