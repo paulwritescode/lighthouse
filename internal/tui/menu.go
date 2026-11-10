@@ -160,15 +160,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() tea.View {
 	width := m.width
-	if width < 60 {
-		width = 60
+	if width < 36 {
+		width = 36
 	}
-	if width > 88 {
-		width = 88
+	if width > 76 {
+		width = 76
 	}
-	compact := m.height < 28
 	logoStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true)
-	sectionStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0")).Bold(true).MarginTop(1)
+	sectionStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0")).Bold(true)
 	detailStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#71605B", "#A9A3A0"))
 	dangerStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#B42318", "#F07373")).Bold(true)
 	greenStyle := lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#167B4A", "#72D6A0"))
@@ -201,28 +200,18 @@ func (m model) View() tea.View {
 		b.WriteString(greenStyle.Render(m.updateMessage) + "\n")
 	}
 	b.WriteString(lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
-	if !compact {
-		b.WriteString(lipgloss.NewStyle().Foreground(adaptiveColor(m.isDark, "#252525", "#F4F2ED")).Bold(true).Render("Your local memory, at your command.") + "\n")
-		b.WriteString(detailStyle.Render("Choose an action. System changes always ask before they’re applied.") + "\n")
-	}
 	lastSection := ""
 	for i, row := range menuItems {
 		if row.section != lastSection {
-			section := sectionStyle
-			if compact {
-				section = sectionStyle.MarginTop(0)
-			}
-			b.WriteString(section.Render(row.section) + "\n")
+			b.WriteString(sectionStyle.Render(row.section) + "\n")
 			lastSection = row.section
 		}
-		marker := "  "
 		name := row.title
 		if row.danger {
 			name = dangerStyle.Render(name)
 		}
-		if i == m.cursor && !compact {
-			marker = "› "
-			name = selectedStyle.Render(marker + row.title)
+		if i == m.cursor {
+			name = selectedStyle.Render("› " + row.title)
 		} else {
 			name = "  " + name
 		}
@@ -231,9 +220,9 @@ func (m model) View() tea.View {
 			b.WriteString("    " + detailStyle.Render(row.detail) + "\n")
 		}
 	}
-	b.WriteString("\n" + lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
+	b.WriteString(lineStyle.Render(strings.Repeat("─", width-4)) + "\n")
 	b.WriteString(keyStyle.Render("↑ ↓") + " move  " + keyStyle.Render("enter") + " choose  " + keyStyle.Render("c") + " check  " + keyStyle.Render("q") + " quit")
-	return tea.NewView(lipgloss.NewStyle().Padding(1, 2).Width(width).Render(b.String()))
+	return tea.NewView(lipgloss.NewStyle().Padding(0, 1).Width(width).Render(b.String()))
 }
 
 func adaptiveColor(isDark bool, light, dark string) color.Color {

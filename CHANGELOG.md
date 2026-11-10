@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.4 — 2026-11-10
+
+### Changed
+
+- Tighten the interactive control menu by removing blank section gaps and outer vertical padding.
+- Keep the current action visibly selected in a standard 24-line terminal.
+
 ## 0.4.3 — 2026-11-10
 
 ### Fixed
