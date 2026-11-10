@@ -58,7 +58,7 @@ Homebrew adds the tap and trusts this formula during installation, builds the pi
 To pin a release for repeatable setups, replace `@latest` with a version:
 
 ```sh
-go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.6.0
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.6.1
 ```
 
 The first time you run `lighthouse`, an interactive setup guides you through the local hostname and optional sign-in service one question at a time. System-level changes are opt-in. After setup, running `lighthouse` opens the control menu. Run `lighthouse setup` to revisit the setup questions.

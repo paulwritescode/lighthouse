@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -340,14 +339,8 @@ func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {
 	if normalized, _, err := store.NormalizeTags(project, nil); err == nil {
 		project = normalized
 	}
-	items, err := s.store.Search(r.Context(), q, project, 50)
 	sortKey := r.URL.Query().Get("sort")
-	if sortKey == "title" {
-		sort.SliceStable(items, func(i, j int) bool { return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title) })
-	}
-	if sortKey == "tag" {
-		sort.SliceStable(items, func(i, j int) bool { return items[i].Project < items[j].Project })
-	}
+	items, err := s.store.SearchSorted(r.Context(), q, project, 50, sortKey)
 	d := pageData{Page: "library", Title: "Library", Query: q, Project: project, Sort: sortKey, Artifacts: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
 	d.Counts, _ = s.store.Counts(r.Context())
 	d.Notice = r.URL.Query().Get("notice")
@@ -373,14 +366,8 @@ func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
 	if normalized, _, err := store.NormalizeTags(project, nil); err == nil {
 		project = normalized
 	}
-	items, err := s.store.ListMemory(r.Context(), project, 100)
 	sortKey := r.URL.Query().Get("sort")
-	if sortKey == "key" {
-		sort.SliceStable(items, func(i, j int) bool { return strings.ToLower(items[i].Key) < strings.ToLower(items[j].Key) })
-	}
-	if sortKey == "tag" {
-		sort.SliceStable(items, func(i, j int) bool { return items[i].Project < items[j].Project })
-	}
+	items, err := s.store.ListMemorySorted(r.Context(), project, 100, sortKey)
 	d := pageData{Page: "memory", Title: "Memory", Project: project, Sort: sortKey, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching", Notice: r.URL.Query().Get("notice")}
 	d.Counts, _ = s.store.Counts(r.Context())
 	if err != nil {

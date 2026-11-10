@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.1 — 2026-11-10
+
+### Fixed
+
+- Apply dashboard result and memory sorting before the display limit, so sorted views include the correct matching records.
+
 ## 0.6.0 — 2026-11-10
 
 ### Added

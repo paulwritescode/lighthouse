@@ -53,3 +53,36 @@ func TestTagsAcrossResultsAndMemory(t *testing.T) {
 		t.Fatalf("secondary tag group missing: %+v", groups)
 	}
 }
+
+func TestSortAppliesBeforeDisplayLimit(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "sort.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.SaveArtifact(ctx, "Alpha", "first", "zeta", "test", "result"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveArtifact(ctx, "Zulu", "second", "alpha", "test", "result"); err != nil {
+		t.Fatal(err)
+	}
+	results, err := db.SearchSorted(ctx, "", "", 1, "title")
+	if err != nil || len(results) != 1 || results[0].Title != "Alpha" {
+		t.Fatalf("result sort after limit: %+v, %v", results, err)
+	}
+	results, err = db.SearchSorted(ctx, "", "", 1, "tag")
+	if err != nil || len(results) != 1 || results[0].Project != "alpha" {
+		t.Fatalf("tag sort after limit: %+v, %v", results, err)
+	}
+	if _, err := db.SaveMemory(ctx, "alpha", "first", "zeta", "fact", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveMemory(ctx, "zulu", "second", "alpha", "fact", ""); err != nil {
+		t.Fatal(err)
+	}
+	memories, err := db.ListMemorySorted(ctx, "", 1, "key")
+	if err != nil || len(memories) != 1 || memories[0].Key != "alpha" {
+		t.Fatalf("memory sort after limit: %+v, %v", memories, err)
+	}
+}

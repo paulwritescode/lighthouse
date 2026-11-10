@@ -676,16 +676,31 @@ func (s *Store) UpdateArtifact(ctx context.Context, id string, patch map[string]
 }
 
 func (s *Store) Search(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
+	return s.SearchSorted(ctx, query, project, limit, "newest")
+}
+
+func artifactOrder(sortKey, prefix string) string {
+	switch sortKey {
+	case "title":
+		return prefix + "title COLLATE NOCASE ASC, " + prefix + "created_at DESC"
+	case "tag":
+		return prefix + "project COLLATE NOCASE ASC, " + prefix + "created_at DESC"
+	default:
+		return prefix + "created_at DESC"
+	}
+}
+
+func (s *Store) SearchSorted(ctx context.Context, query, project string, limit int, sortKey string) ([]Artifact, error) {
 	limit = clampLimit(limit, 50)
 	if strings.TrimSpace(query) == "" {
-		return s.list(ctx, "", project, limit)
+		return s.listSorted(ctx, project, limit, sortKey)
 	}
 	phrase := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
 	rows, err := s.db.QueryContext(ctx, `
 SELECT a.id,a.title,a.content,a.project,a.agent,a.kind,a.content_hash,a.metadata_json,a.tags_json,a.created_at
 FROM artifacts_fts f JOIN artifacts a ON a.id=f.artifact_id
 WHERE artifacts_fts MATCH ? AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?))
-ORDER BY a.created_at DESC LIMIT ?`, phrase, project, project, project, limit)
+ORDER BY `+artifactOrder(sortKey, "a.")+` LIMIT ?`, phrase, project, project, project, limit)
 	if err == nil {
 		defer rows.Close()
 		items, scanErr := scanArtifacts(rows)
@@ -695,7 +710,7 @@ ORDER BY a.created_at DESC LIMIT ?`, phrase, project, project, project, limit)
 	}
 	// Invalid FTS syntax or a query with punctuation still gets a safe literal fallback.
 	like := literalLikePattern(query)
-	return s.listLike(ctx, like, project, limit)
+	return s.listLikeSorted(ctx, like, project, limit, sortKey)
 }
 
 // ArtifactIDs returns IDs matching the same project and full-text filters as
@@ -751,16 +766,20 @@ func scanIDs(rows *sql.Rows) ([]string, error) {
 }
 
 func (s *Store) list(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC LIMIT ?`, project, project, project, limit)
+	return s.listSorted(ctx, project, limit, "newest")
+}
+func (s *Store) listSorted(ctx context.Context, project string, limit int, sortKey string) ([]Artifact, error) {
+	sqlText := `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, sqlText, project, project, project, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	return scanArtifacts(rows)
 }
-
-func (s *Store) listLike(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC LIMIT ?`, query, query, query, project, project, project, limit)
+func (s *Store) listLikeSorted(ctx context.Context, query, project string, limit int, sortKey string) ([]Artifact, error) {
+	sqlText := `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, sqlText, query, query, query, project, project, project, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -909,7 +928,18 @@ VALUES(?,?,?,?,?,?,?,'active',?,?,?) ON CONFLICT(scope_key,memory_key) DO UPDATE
 }
 
 func (s *Store) ListMemory(ctx context.Context, project string, limit int) ([]Memory, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,memory_key,body,scope_key,kind,source_id,revision,tags_json,created_at,updated_at FROM memory_items WHERE status='active' AND (?='' OR scope_key=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY updated_at DESC LIMIT ?`, project, project, project, clampLimit(limit, 100))
+	return s.ListMemorySorted(ctx, project, limit, "newest")
+}
+func (s *Store) ListMemorySorted(ctx context.Context, project string, limit int, sortKey string) ([]Memory, error) {
+	order := "updated_at DESC"
+	if sortKey == "key" {
+		order = "memory_key COLLATE NOCASE ASC, updated_at DESC"
+	}
+	if sortKey == "tag" {
+		order = "scope_key COLLATE NOCASE ASC, updated_at DESC"
+	}
+	sqlText := `SELECT id,memory_key,body,scope_key,kind,source_id,revision,tags_json,created_at,updated_at FROM memory_items WHERE status='active' AND (?='' OR scope_key=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY ` + order + ` LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, sqlText, project, project, project, clampLimit(limit, 100))
 	if err != nil {
 		return nil, err
 	}
