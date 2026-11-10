@@ -2,8 +2,8 @@ class Lighthouse < Formula
   desc "Local memory for coding agents"
   homepage "https://lighthouse.ovenplatform.com"
   url "https://github.com/paulwritescode/lighthouse.git",
-      tag:      "v0.6.0",
-      revision: "71f6bcd7d7ac5f4b3312969deb11f56822c2f04d"
+      tag:      "v0.6.1",
+      revision: "4b45f6bb838c709cd5db64c61da164017b37c5fa"
   license "MIT"
 
   depends_on "go" => :build
@@ -14,7 +14,7 @@ class Lighthouse < Formula
   end
 
   test do
-    assert_match "Lighthouse v0.6.0", shell_output("#{bin}/lighthouse version")
+    assert_match "Lighthouse v0.6.1", shell_output("#{bin}/lighthouse version")
     assert_match "Commands:", shell_output("#{bin}/lighthouse --help")
   end
 end
