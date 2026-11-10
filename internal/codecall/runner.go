@@ -113,9 +113,10 @@ func (r Runner) get(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple
 func (r Runner) save(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var title, content, project, agent, kind string
 	var fields *starlark.Dict
+	var tags *starlark.List
 	agent = "agent"
 	kind = "result"
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "title", &title, "content", &content, "project?", &project, "agent?", &agent, "kind?", &kind, "fields?", &fields); err != nil {
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "title", &title, "content", &content, "project?", &project, "agent?", &agent, "kind?", &kind, "fields?", &fields, "tags?", &tags); err != nil {
 		return nil, err
 	}
 	if project == "" {
@@ -125,7 +126,11 @@ func (r Runner) save(t *starlark.Thread, b *starlark.Builtin, args starlark.Tupl
 	if err != nil {
 		return nil, err
 	}
-	a, err := r.Store.SaveArtifactFields(r.Context, title, content, project, agent, kind, custom)
+	tagNames, err := starlarkTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	a, err := r.Store.SaveArtifactTagged(r.Context, title, content, project, agent, kind, custom, tagNames)
 	if err != nil {
 		return nil, err
 	}
@@ -240,13 +245,18 @@ func (r Runner) loadMemory(t *starlark.Thread, b *starlark.Builtin, args starlar
 func (r Runner) upsertMemory(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var key, body, project, kind, source string
 	kind = "fact"
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "key", &key, "body", &body, "project?", &project, "kind?", &kind, "source_id?", &source); err != nil {
+	var tags *starlark.List
+	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "key", &key, "body", &body, "project?", &project, "kind?", &kind, "source_id?", &source, "tags?", &tags); err != nil {
 		return nil, err
 	}
 	if project == "" {
 		project = r.Project
 	}
-	m, err := r.Store.SaveMemory(r.Context, key, body, project, kind, source)
+	tagNames, err := starlarkTags(tags)
+	if err != nil {
+		return nil, err
+	}
+	m, err := r.Store.SaveMemoryTagged(r.Context, key, body, project, kind, source, tagNames)
 	if err != nil {
 		return nil, err
 	}
@@ -364,4 +374,19 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 		l.err = err
 	}
 	return n, err
+}
+
+func starlarkTags(list *starlark.List) ([]string, error) {
+	if list == nil {
+		return nil, nil
+	}
+	tags := make([]string, 0, list.Len())
+	for i := 0; i < list.Len(); i++ {
+		v, ok := starlark.AsString(list.Index(i))
+		if !ok {
+			return nil, fmt.Errorf("tags must contain only strings")
+		}
+		tags = append(tags, v)
+	}
+	return tags, nil
 }

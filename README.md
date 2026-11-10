@@ -58,7 +58,7 @@ Homebrew adds the tap and trusts this formula during installation, builds the pi
 To pin a release for repeatable setups, replace `@latest` with a version:
 
 ```sh
-go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.4.2
+go install github.com/paulwritescode/lighthouse/cmd/lighthouse@v0.6.0
 ```
 
 The first time you run `lighthouse`, an interactive setup guides you through the local hostname and optional sign-in service one question at a time. System-level changes are opt-in. After setup, running `lighthouse` opens the control menu. Run `lighthouse setup` to revisit the setup questions.
@@ -176,11 +176,11 @@ Use `lighthouse.OpenDefault()` to open the same database used by the CLI and das
 
 The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. The CLI can also add a `lighthouse` entry to the local hosts file so you can use `http://lighthouse:8080`. It uses embedded Go templates, CSS, native forms, and a small local script for theme switching and browser confirmation dialogs. No Node runtime, frontend build, React, or CSS framework is required to install or run Lighthouse.
 
-The dark-default dashboard has a light-mode switch saved in the browser. Overview shows record counts, seven-day activity, record mix, top project keys, recent results, and the current SQLite footprint (database file plus active `-wal` file). Projects groups existing result and memory project keys without adding a separate project entity. Activity holds safeguards and the audit trail. Data tools holds import and export.
+The dark-default dashboard has a light-mode switch saved in the browser. Overview shows record counts, seven-day activity, record mix, top tags, recent results, and the current SQLite footprint (database file plus active `-wal` file). Tags groups primary project keys and secondary tags across results and memory without a separate project entity. Activity holds safeguards and the audit trail. Data tools holds import, export, and database deletion. The base SQLite file contains schema and indexes even when there are no records; the WAL can contain recent writes until checkpointing.
 
-The Results and Memory screens support individual CRUD, manually selected batches, and all records matching the active filters. Bulk result edits can set project, kind, or agent; bulk memory edits can set project or kind. The Results screen links to batch import. Bulk deletes require confirmation; bulk writes are audited per record and capped at 10,000 records. The tables show the newest 50 results and 100 memory items; “select every matching” applies the filters to the full set up to the cap.
+Each result and memory item can have one primary tag (the existing project key) and up to 20 secondary tags. Tags use lowercase kebab-case names, and the same name is reused across records. Results and Memory can filter by any tag and sort by title/key or primary tag; the Tags page groups all tagged items. Agent code calls accept `tags=["research", "writing"]` on `save` and `upsert_memory`, and `lighthouse add` accepts `--tags research,writing`. The Results and Memory screens support individual CRUD, manually selected batches, and all records matching the active filters. Bulk result edits can set project, kind, or agent; bulk memory edits can set project or kind. The Results screen links to batch import. Bulk deletes require confirmation; bulk writes are audited per record and capped at 10,000 records. The tables show the newest 50 results and 100 memory items; “select every matching” applies the filters to the full set up to the cap.
 
-Dashboard mutations require a same-origin form and CSRF token, and changes are audited. The CSRF key is stored with user-only permissions so restarting the dashboard during an update does not invalidate forms in open tabs. If a form is rejected, refresh that page and submit again. Agent CLI operations work while the dashboard is stopped.
+Deleting the database from Data tools requires typing DELETE, browser confirmation, and a native macOS administrator password dialog. The password is never sent to the dashboard. Lighthouse removes the database and journal files and creates a fresh, empty database for the still-running dashboard. Dashboard mutations require a same-origin form and CSRF token, and changes are audited. The CSRF key is stored with user-only permissions so restarting the dashboard during an update does not invalidate forms in open tabs. If a form is rejected, refresh that page and submit again. Agent CLI operations work while the dashboard is stopped.
 
 ### Startup service and local hostname
 

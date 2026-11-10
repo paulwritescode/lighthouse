@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -187,5 +188,49 @@ func TestBulkArtifactFormCSRFRejectsForeignOriginAndWrongToken(t *testing.T) {
 				t.Fatalf("POST status = %d, want CSRF rejection", response.Code)
 			}
 		})
+	}
+}
+
+func TestDeleteDatabaseRequiresConfirmationAndRecreatesIt(t *testing.T) {
+	path := t.TempDir() + "/lighthouse.db"
+	db, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveArtifact(t.Context(), "Before", "Old content", "test", "test", "result"); err != nil {
+		t.Fatal(err)
+	}
+	server, err := newWithCSRFPath(db, path, t.TempDir()+"/csrf-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.store.Close() })
+	authorized := 0
+	server.authorizeReset = func(_ context.Context) error { authorized++; return nil }
+	post := func(phrase string) *httptest.ResponseRecorder {
+		form := url.Values{"csrf_token": {server.csrf}, "confirm": {"yes"}, "erase_phrase": {phrase}}
+		req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/data/erase", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://localhost:8080")
+		req.AddCookie(&http.Cookie{Name: "lighthouse_csrf", Value: server.csrf})
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+	if response := post("wrong"); response.Code != http.StatusBadRequest || authorized != 0 {
+		t.Fatalf("invalid confirmation: %d, auth calls %d", response.Code, authorized)
+	}
+	if response := post("DELETE"); response.Code != http.StatusSeeOther || authorized != 1 {
+		t.Fatalf("authorized delete: %d, auth calls %d, body %s", response.Code, authorized, response.Body.String())
+	}
+	counts, err := server.store.Counts(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Artifacts != 0 || counts.Changes != 0 {
+		t.Fatalf("old data remains: %+v", counts)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("fresh database missing: %v", err)
 	}
 }

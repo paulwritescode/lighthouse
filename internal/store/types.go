@@ -7,6 +7,7 @@ type Artifact struct {
 	Title       string         `json:"title"`
 	Content     string         `json:"content"`
 	Project     string         `json:"project,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
 	Agent       string         `json:"agent"`
 	Kind        string         `json:"kind"`
 	CreatedAt   time.Time      `json:"created_at"`
@@ -38,6 +39,7 @@ type Memory struct {
 	Key       string    `json:"key"`
 	Body      string    `json:"body"`
 	Project   string    `json:"project,omitempty"`
+	Tags      []string  `json:"tags,omitempty"`
 	Kind      string    `json:"kind"`
 	SourceID  string    `json:"source_id,omitempty"`
 	Revision  int64     `json:"revision"`

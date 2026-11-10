@@ -32,6 +32,8 @@ updated = upsert_memory(key="stable-key", body="One useful durable fact", kind="
 emit(updated)
 ```
 
+For each write, use the stable `--project` key as the primary tag. Add up to 20 secondary tags with `tags=["existing-tag", "topic"]` when the conversation supplies clear topics. Normalize names to lowercase kebab-case, reuse existing tags from search results or the Tags dashboard when they fit, and avoid inventing broad or redundant tags.
+
 Both writes return the record plus refreshed `revision`, `snapshot_id`, and `context_patch`. Apply the latest patch to the active conversation; Lighthouse cannot change hidden provider context. Store durable facts only when the user asked or confirmed. The dashboard can edit data through protected forms, but agent code calls remain the primary interface. Do not add MCP or use direct SQL.
 
 ## Flexible documents and changes

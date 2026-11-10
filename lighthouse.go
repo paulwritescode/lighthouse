@@ -36,6 +36,7 @@ type ArtifactInput struct {
 	Agent   string
 	Kind    string
 	Fields  map[string]any
+	Tags    []string
 }
 
 // MemoryInput contains a durable, project-scoped fact or preference.
@@ -45,6 +46,7 @@ type MemoryInput struct {
 	Project  string
 	Kind     string
 	SourceID string
+	Tags     []string
 }
 
 // Database is a handle to one local Lighthouse SQLite database.
@@ -87,7 +89,7 @@ func (db *Database) Close() error { return db.store.Close() }
 
 // CreateArtifact creates an indexed result with optional JSON-compatible fields.
 func (db *Database) CreateArtifact(ctx context.Context, input ArtifactInput) (Artifact, error) {
-	return db.store.SaveArtifactFields(ctx, input.Title, input.Content, input.Project, input.Agent, input.Kind, input.Fields, "library")
+	return db.store.SaveArtifactTagged(ctx, input.Title, input.Content, input.Project, input.Agent, input.Kind, input.Fields, input.Tags, "library")
 }
 
 // GetArtifact returns an artifact by its stable ID.
@@ -117,7 +119,7 @@ func (db *Database) DeleteArtifact(ctx context.Context, id string) error {
 
 // CreateMemory creates or updates a memory item with the same project/key.
 func (db *Database) CreateMemory(ctx context.Context, input MemoryInput) (Memory, error) {
-	return db.store.SaveMemory(ctx, input.Key, input.Body, input.Project, input.Kind, input.SourceID, "library")
+	return db.store.SaveMemoryTagged(ctx, input.Key, input.Body, input.Project, input.Kind, input.SourceID, input.Tags, "library")
 }
 
 // ListMemory returns active memory items in the requested project scope.
@@ -132,7 +134,10 @@ func (db *Database) GetMemory(ctx context.Context, id string) (Memory, error) {
 
 // UpdateMemory replaces the selected memory item's key, body, scope, and metadata.
 func (db *Database) UpdateMemory(ctx context.Context, id string, input MemoryInput) error {
-	return db.store.UpdateMemory(ctx, id, input.Key, input.Body, input.Project, input.Kind, input.SourceID, "library")
+	if input.Tags == nil {
+		return db.store.UpdateMemory(ctx, id, input.Key, input.Body, input.Project, input.Kind, input.SourceID, "library")
+	}
+	return db.store.UpdateMemoryTagged(ctx, id, input.Key, input.Body, input.Project, input.Kind, input.SourceID, input.Tags, "library")
 }
 
 // DeleteMemory retracts a memory item and records an audit event.

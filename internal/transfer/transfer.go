@@ -195,12 +195,12 @@ func marshalPDF(d Dataset) ([]byte, error) {
 	var lines []string
 	lines = append(lines, "Lighthouse local data export", fmt.Sprintf("%d results  |  %d memories", len(d.Artifacts), len(d.Memories)), "")
 	for _, a := range d.Artifacts {
-		lines = append(lines, a.Title, a.Project+"  /  "+a.Agent+"  /  "+a.Kind)
+		lines = append(lines, a.Title, a.Project+"  /  "+a.Agent+"  /  "+a.Kind+"  /  tags: "+strings.Join(a.Tags, ", "))
 		lines = append(lines, wrap(a.Content, 88)...)
 		lines = append(lines, "")
 	}
 	for _, m := range d.Memories {
-		lines = append(lines, "Memory: "+m.Key, m.Project+"  /  "+m.Kind)
+		lines = append(lines, "Memory: "+m.Key, m.Project+"  /  "+m.Kind+"  /  tags: "+strings.Join(m.Tags, ", "))
 		lines = append(lines, wrap(m.Body, 88)...)
 		lines = append(lines, "")
 	}

@@ -454,6 +454,7 @@ func serve(s *store.Store, path string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer handler.Close()
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	srv := &http.Server{Addr: addr, Handler: handler.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	friendly := "http://lighthouse.localhost:" + fmt.Sprint(*port)
@@ -478,6 +479,7 @@ func add(s *store.Store, ctx context.Context, args []string) error {
 	project := f.String("project", "", "project scope")
 	agent := f.String("agent", "agent", "agent name")
 	kind := f.String("kind", "result", "result kind")
+	tags := f.String("tags", "", "comma-separated secondary tags")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -488,7 +490,11 @@ func add(s *store.Store, ctx context.Context, args []string) error {
 	if len(content) > 2<<20 {
 		return errors.New("stdin exceeds 2 MiB")
 	}
-	a, err := s.SaveArtifact(ctx, *title, string(content), *project, *agent, *kind)
+	var secondary []string
+	if strings.TrimSpace(*tags) != "" {
+		secondary = strings.Split(*tags, ",")
+	}
+	a, err := s.SaveArtifactTagged(ctx, *title, string(content), *project, *agent, *kind, nil, secondary)
 	if err != nil {
 		return err
 	}

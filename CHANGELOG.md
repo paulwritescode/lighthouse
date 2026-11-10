@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.6.0 — 2026-11-10
+
+### Added
+
+- Add one primary tag and multiple secondary tags to results and memory, with normalization, dashboard filtering, sorting, grouping, agent code-call support, and CLI `--tags` input.
+- Add a Data tools danger zone that removes and recreates the local database after CSRF, explicit confirmation, and a native macOS administrator prompt.
+
+### Changed
+
+- Explain the base SQLite file and write-ahead log size when no results or memory are saved.
+
+
 ## 0.5.0 — 2026-11-10
 
 ### Added

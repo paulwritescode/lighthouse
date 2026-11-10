@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -15,9 +16,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/paulwritescode/lighthouse/internal/store"
@@ -28,10 +33,12 @@ import (
 var assets embed.FS
 
 type Server struct {
-	store  *store.Store
-	dbPath string
-	csrf   string
-	tmpl   *template.Template
+	mu             sync.RWMutex
+	authorizeReset func(context.Context) error
+	store          *store.Store
+	dbPath         string
+	csrf           string
+	tmpl           *template.Template
 }
 
 type pageData struct {
@@ -39,11 +46,13 @@ type pageData struct {
 	Title          string
 	Query          string
 	Project        string
+	Sort           string
 	Error          string
 	DBPath         string
 	DBSize         string
 	DBWALSize      string
 	DBTotalSize    string
+	CanDeleteDB    bool
 	Counts         store.Counts
 	Artifacts      []store.Artifact
 	Memories       []store.Memory
@@ -72,7 +81,7 @@ func New(s *store.Store, dbPath string) (*Server, error) {
 }
 
 func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
-	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "short": func(v string, n int) string {
+	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "short": func(v string, n int) string {
 		if len(v) <= n {
 			return v
 		}
@@ -86,7 +95,7 @@ func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: s, dbPath: dbPath, csrf: token, tmpl: t}, nil
+	return &Server{store: s, dbPath: dbPath, csrf: token, tmpl: t, authorizeReset: authorizeMacReset}, nil
 }
 
 func loadCSRFToken(path string) (string, error) {
@@ -138,6 +147,13 @@ func loadCSRFToken(path string) (string, error) {
 	return value, nil
 }
 
+// Close releases the active store, including one reopened after database deletion.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.store.Close()
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.home)
@@ -147,6 +163,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /projects", s.projects)
 	mux.HandleFunc("GET /activity", s.activity)
 	mux.HandleFunc("GET /data", s.dataTools)
+	mux.HandleFunc("POST /data/erase", s.eraseData)
 	mux.HandleFunc("GET /export", s.exportData)
 	mux.HandleFunc("GET /artifacts/new", s.newArtifact)
 	mux.HandleFunc("GET /artifacts/{id}/edit", s.editArtifact)
@@ -162,7 +179,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /import", s.importData)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(mustSub(assets, "static"))))
-	return s.localOnly(mux)
+	inner := s.localOnly(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/data/erase" && r.Method == http.MethodPost {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+		} else {
+			s.mu.RLock()
+			defer s.mu.RUnlock()
+		}
+		inner.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) render(w http.ResponseWriter, status int, d pageData) {
@@ -217,8 +244,63 @@ func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) dataTools(w http.ResponseWriter, r *http.Request) {
-	d := pageData{Page: "data", Title: "Data tools", DBPath: s.dbPath, Notice: r.URL.Query().Get("notice")}
+	d := pageData{Page: "data", Title: "Data tools", DBPath: s.dbPath, Notice: r.URL.Query().Get("notice"), CanDeleteDB: runtime.GOOS == "darwin"}
 	s.render(w, http.StatusOK, d)
+}
+
+func authorizeMacReset(ctx context.Context) error {
+	if runtime.GOOS != "darwin" {
+		return errors.New("database deletion from the dashboard currently requires macOS")
+	}
+	// macOS owns the password dialog. The web request never contains it.
+	return exec.CommandContext(ctx, "osascript", "-e", `do shell script "/usr/bin/true" with administrator privileges`).Run()
+}
+
+func (s *Server) eraseData(w http.ResponseWriter, r *http.Request) {
+	if err := s.requireConfirm(r); err != nil || r.FormValue("erase_phrase") != "DELETE" {
+		http.Error(w, "Type DELETE and confirm to delete the local database.", http.StatusBadRequest)
+		return
+	}
+	if s.dbPath == "" || s.dbPath == ":memory:" {
+		http.Error(w, "This database has no file to delete.", http.StatusBadRequest)
+		return
+	}
+	info, err := os.Lstat(s.dbPath)
+	if err != nil || !info.Mode().IsRegular() {
+		http.Error(w, "The database path is missing or is not a regular file.", http.StatusBadRequest)
+		return
+	}
+	if err := s.authorizeReset(r.Context()); err != nil {
+		http.Error(w, "Administrator confirmation was cancelled or failed. No data was deleted.", http.StatusForbidden)
+		return
+	}
+	if err := s.replaceDatabase(); err != nil {
+		http.Error(w, "Could not replace the database: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.redirectNotice(w, r, "/data", "Database deleted and recreated. All results, memory, and history are gone")
+}
+
+// Caller holds Server.mu exclusively, preventing requests from using the old store.
+func (s *Server) replaceDatabase() error {
+	if err := s.store.Close(); err != nil {
+		return fmt.Errorf("close database: %w", err)
+	}
+	for _, path := range []string{s.dbPath + "-wal", s.dbPath + "-shm", s.dbPath} {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			// Reopen the surviving database when possible so the dashboard stays usable.
+			if recovered, openErr := store.Open(s.dbPath); openErr == nil {
+				s.store = recovered
+			}
+			return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
+		}
+	}
+	fresh, err := store.Open(s.dbPath)
+	if err != nil {
+		return fmt.Errorf("initialize fresh database: %w", err)
+	}
+	s.store = fresh
+	return nil
 }
 
 func databaseFootprint(path string) (mainSize, walSize, totalSize string) {
@@ -255,8 +337,18 @@ func formatBytes(n int64) string {
 func (s *Server) artifacts(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if normalized, _, err := store.NormalizeTags(project, nil); err == nil {
+		project = normalized
+	}
 	items, err := s.store.Search(r.Context(), q, project, 50)
-	d := pageData{Page: "library", Title: "Library", Query: q, Project: project, Artifacts: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
+	sortKey := r.URL.Query().Get("sort")
+	if sortKey == "title" {
+		sort.SliceStable(items, func(i, j int) bool { return strings.ToLower(items[i].Title) < strings.ToLower(items[j].Title) })
+	}
+	if sortKey == "tag" {
+		sort.SliceStable(items, func(i, j int) bool { return items[i].Project < items[j].Project })
+	}
+	d := pageData{Page: "library", Title: "Library", Query: q, Project: project, Sort: sortKey, Artifacts: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
 	d.Counts, _ = s.store.Counts(r.Context())
 	d.Notice = r.URL.Query().Get("notice")
 	if err != nil {
@@ -278,8 +370,18 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if normalized, _, err := store.NormalizeTags(project, nil); err == nil {
+		project = normalized
+	}
 	items, err := s.store.ListMemory(r.Context(), project, 100)
-	d := pageData{Page: "memory", Title: "Memory", Project: project, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching", Notice: r.URL.Query().Get("notice")}
+	sortKey := r.URL.Query().Get("sort")
+	if sortKey == "key" {
+		sort.SliceStable(items, func(i, j int) bool { return strings.ToLower(items[i].Key) < strings.ToLower(items[j].Key) })
+	}
+	if sortKey == "tag" {
+		sort.SliceStable(items, func(i, j int) bool { return items[i].Project < items[j].Project })
+	}
+	d := pageData{Page: "memory", Title: "Memory", Project: project, Sort: sortKey, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching", Notice: r.URL.Query().Get("notice")}
 	d.Counts, _ = s.store.Counts(r.Context())
 	if err != nil {
 		d.Error = err.Error()
@@ -359,7 +461,8 @@ func (s *Server) requireConfirm(r *http.Request) error {
 	return nil
 }
 func (s *Server) newArtifact(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusOK, pageData{Page: "new-artifact", Title: "New result", DBPath: s.dbPath, FieldsJSON: "{}"})
+	groups, _ := s.store.ProjectSummaries(r.Context())
+	s.render(w, http.StatusOK, pageData{Page: "new-artifact", Title: "New result", DBPath: s.dbPath, FieldsJSON: "{}", Projects: groups})
 }
 func (s *Server) editArtifact(w http.ResponseWriter, r *http.Request) {
 	a, err := s.store.GetArtifact(r.Context(), r.PathValue("id"))
@@ -380,7 +483,7 @@ func (s *Server) createArtifact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	a, err := s.store.SaveArtifactFields(r.Context(), r.FormValue("title"), r.FormValue("content"), r.FormValue("project"), "user", r.FormValue("kind"), fields, "dashboard")
+	a, err := s.store.SaveArtifactTagged(r.Context(), r.FormValue("title"), r.FormValue("content"), r.FormValue("project"), "user", r.FormValue("kind"), fields, parseTags(r.FormValue("tags")), "dashboard")
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -397,7 +500,7 @@ func (s *Server) updateArtifact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	patch := map[string]any{"title": r.FormValue("title"), "content": r.FormValue("content"), "project": r.FormValue("project"), "agent": r.FormValue("agent"), "kind": r.FormValue("kind")}
+	patch := map[string]any{"title": r.FormValue("title"), "content": r.FormValue("content"), "project": r.FormValue("project"), "agent": r.FormValue("agent"), "kind": r.FormValue("kind"), "tags": parseTags(r.FormValue("tags"))}
 	for k, v := range fields {
 		patch[k] = v
 	}
@@ -559,14 +662,15 @@ func uniqueIDs(values []string) []string {
 	return ids
 }
 func (s *Server) newMemory(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusOK, pageData{Page: "new-memory", Title: "New memory", DBPath: s.dbPath})
+	groups, _ := s.store.ProjectSummaries(r.Context())
+	s.render(w, http.StatusOK, pageData{Page: "new-memory", Title: "New memory", DBPath: s.dbPath, Projects: groups})
 }
 func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", 400)
 		return
 	}
-	_, err := s.store.SaveMemory(r.Context(), r.FormValue("key"), r.FormValue("body"), r.FormValue("project"), r.FormValue("kind"), r.FormValue("source_id"), "dashboard")
+	_, err := s.store.SaveMemoryTagged(r.Context(), r.FormValue("key"), r.FormValue("body"), r.FormValue("project"), r.FormValue("kind"), r.FormValue("source_id"), parseTags(r.FormValue("tags")), "dashboard")
 	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
@@ -578,7 +682,7 @@ func (s *Server) updateMemory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid form", 400)
 		return
 	}
-	if err := s.store.UpdateMemory(r.Context(), r.PathValue("id"), r.FormValue("key"), r.FormValue("body"), r.FormValue("project"), r.FormValue("kind"), r.FormValue("source_id"), "dashboard"); err != nil {
+	if err := s.store.UpdateMemoryTagged(r.Context(), r.PathValue("id"), r.FormValue("key"), r.FormValue("body"), r.FormValue("project"), r.FormValue("kind"), r.FormValue("source_id"), parseTags(r.FormValue("tags")), "dashboard"); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
@@ -595,6 +699,13 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	}
 	s.redirectNotice(w, r, "/memory", "Memory deleted")
 }
+func parseTags(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return []string{}
+	}
+	return strings.Split(raw, ",")
+}
+
 func parseFields(raw string) (map[string]any, error) {
 	var fields map[string]any
 	if strings.TrimSpace(raw) == "" {
