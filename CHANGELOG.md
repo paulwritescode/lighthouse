@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.5.0 — 2026-11-10
+
+### Added
+
+- Add a dark-default dashboard with a persistent light-mode switch and matching logo and favicon.
+- Add dedicated Projects, Activity, and Data tools pages, with project groups derived from existing result and memory keys.
+- Add record-mix and project-distribution charts alongside the seven-day activity chart.
+
+### Changed
+
+- Rebuild dashboard spacing, tables, forms, and empty states around a compact visual system that works on desktop and mobile.
+- Place memory edit and delete controls alongside each record and group bulk actions below the record tables.
+- Use browser confirmation dialogs for destructive dashboard actions while keeping server-side confirmation and CSRF checks.
+- Show create and update notices on result and memory pages.
+
 ## 0.4.4 — 2026-11-10
 
 ### Changed

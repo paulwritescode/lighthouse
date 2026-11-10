@@ -37,6 +37,41 @@ func TestLoadCSRFTokenPersistsWithPrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestDashboardPagesGroupExistingProjectRecords(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/lighthouse.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.SaveArtifact(t.Context(), "Release review", "Recorded result", "dashboard-test", "codex", "result"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveMemory(t.Context(), "review.spacing", "Keep table controls aligned", "dashboard-test", "fact", "", "test"); err != nil {
+		t.Fatal(err)
+	}
+	server, err := newWithCSRFPath(db, "test.db", t.TempDir()+"/csrf-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []string{"/", "/artifacts", "/memory", "/projects", "/activity", "/data"} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://localhost:8080"+route, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d", route, response.Code)
+		}
+		if !strings.Contains(response.Body.String(), `data-theme="dark"`) {
+			t.Fatalf("GET %s is missing the dark default theme", route)
+		}
+	}
+	projects := httptest.NewRecorder()
+	server.Handler().ServeHTTP(projects, httptest.NewRequest(http.MethodGet, "http://localhost:8080/projects", nil))
+	for _, value := range []string{"dashboard-test", "Results", "Memory", ">2</td>"} {
+		if !strings.Contains(projects.Body.String(), value) {
+			t.Errorf("project summary missing %q", value)
+		}
+	}
+}
+
 func TestBulkArtifactFormCSRFAllowsSameOriginNoOp(t *testing.T) {
 	db, err := store.Open(t.TempDir() + "/lighthouse.db")
 	if err != nil {

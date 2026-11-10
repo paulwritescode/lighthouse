@@ -52,6 +52,10 @@ type pageData struct {
 	CSRF           string
 	Changes        []store.ChangeEvent
 	Activity       []store.ActivityDay
+	Projects       []store.ProjectSummary
+	TopProjects    []store.ProjectSummary
+	MixResultWidth int
+	MixMemoryWidth int
 	SecurityStatus string
 	FieldsJSON     string
 	Notice         string
@@ -140,6 +144,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /artifacts", s.artifacts)
 	mux.HandleFunc("GET /artifacts/{id}", s.artifact)
 	mux.HandleFunc("GET /memory", s.memory)
+	mux.HandleFunc("GET /projects", s.projects)
+	mux.HandleFunc("GET /activity", s.activity)
+	mux.HandleFunc("GET /data", s.dataTools)
 	mux.HandleFunc("GET /export", s.exportData)
 	mux.HandleFunc("GET /artifacts/new", s.newArtifact)
 	mux.HandleFunc("GET /artifacts/{id}/edit", s.editArtifact)
@@ -179,11 +186,38 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	d := pageData{Page: "home", Title: "Overview", DBPath: s.dbPath}
 	d.DBSize, d.DBWALSize, d.DBTotalSize = databaseFootprint(s.dbPath)
 	d.Counts, _ = s.store.Counts(ctx)
-	d.Changes, _ = s.store.RecentChanges(ctx, 8)
 	d.Activity, _ = s.store.WeeklyActivity(ctx)
-	d.SecurityStatus = "Local-only · Loopback bound · CSRF protected"
-	d.Artifacts, _ = s.store.Recent(ctx, "", 8)
-	d.RecentMemories, _ = s.store.ListMemory(ctx, "", 6)
+	d.Projects, _ = s.store.ProjectSummaries(ctx)
+	d.TopProjects = d.Projects
+	if len(d.TopProjects) > 5 {
+		d.TopProjects = d.TopProjects[:5]
+	}
+	d.Artifacts, _ = s.store.Recent(ctx, "", 5)
+	total := d.Counts.Artifacts + d.Counts.Memories
+	if total > 0 {
+		d.MixResultWidth = int(d.Counts.Artifacts * 100 / total)
+		d.MixMemoryWidth = int(d.Counts.Memories * 100 / total)
+	}
+	s.render(w, http.StatusOK, d)
+}
+
+func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
+	d := pageData{Page: "projects", Title: "Projects", DBPath: s.dbPath}
+	d.Projects, _ = s.store.ProjectSummaries(r.Context())
+	d.Counts, _ = s.store.Counts(r.Context())
+	s.render(w, http.StatusOK, d)
+}
+
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	d := pageData{Page: "activity", Title: "Activity", DBPath: s.dbPath}
+	d.Changes, _ = s.store.RecentChanges(r.Context(), 100)
+	d.Counts, _ = s.store.Counts(r.Context())
+	d.Activity, _ = s.store.WeeklyActivity(r.Context())
+	s.render(w, http.StatusOK, d)
+}
+
+func (s *Server) dataTools(w http.ResponseWriter, r *http.Request) {
+	d := pageData{Page: "data", Title: "Data tools", DBPath: s.dbPath, Notice: r.URL.Query().Get("notice")}
 	s.render(w, http.StatusOK, d)
 }
 
@@ -236,7 +270,7 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d := pageData{Page: "artifact", Title: a.Title, Artifact: &a, DBPath: s.dbPath}
+	d := pageData{Page: "artifact", Title: a.Title, Artifact: &a, DBPath: s.dbPath, Notice: r.URL.Query().Get("notice")}
 	fields, _ := json.MarshalIndent(a.Fields, "", "  ")
 	d.FieldsJSON = string(fields)
 	d.Counts, _ = s.store.Counts(r.Context())
@@ -245,7 +279,7 @@ func (s *Server) artifact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) memory(w http.ResponseWriter, r *http.Request) {
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
 	items, err := s.store.ListMemory(r.Context(), project, 100)
-	d := pageData{Page: "memory", Title: "Memory", Project: project, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching"}
+	d := pageData{Page: "memory", Title: "Memory", Project: project, Memories: items, DBPath: s.dbPath, SelectAll: r.URL.Query().Get("select") == "all", BulkAll: r.URL.Query().Get("select") == "matching", Notice: r.URL.Query().Get("notice")}
 	d.Counts, _ = s.store.Counts(r.Context())
 	if err != nil {
 		d.Error = err.Error()
@@ -697,7 +731,7 @@ func (s *Server) importData(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not import memory: "+err.Error(), 400)
 		return
 	}
-	s.redirectNotice(w, r, "/", fmt.Sprintf("Imported %d results and %d memory items", a, m))
+	s.redirectNotice(w, r, "/data", fmt.Sprintf("Imported %d results and %d memory items", a, m))
 }
 func mustSub(fsys fs.FS, dir string) fs.FS {
 	f, err := fs.Sub(fsys, dir)

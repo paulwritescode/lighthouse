@@ -962,6 +962,38 @@ func (s *Store) Counts(ctx context.Context) (Counts, error) {
 	return c, err
 }
 
+func (s *Store) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, SUM(results), SUM(memories) FROM (
+		SELECT project AS name, count(*) AS results, 0 AS memories FROM artifacts WHERE project<>'' GROUP BY project
+		UNION ALL
+		SELECT scope_key AS name, 0 AS results, count(*) AS memories FROM memory_items WHERE status='active' AND scope_key<>'' GROUP BY scope_key
+	) GROUP BY name ORDER BY SUM(results)+SUM(memories) DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list project summaries: %w", err)
+	}
+	defer rows.Close()
+	var out []ProjectSummary
+	var max int64
+	for rows.Next() {
+		var p ProjectSummary
+		if err := rows.Scan(&p.Name, &p.Results, &p.Memories); err != nil {
+			return nil, err
+		}
+		p.Total = p.Results + p.Memories
+		if p.Total > max {
+			max = p.Total
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].BarWidth = int(out[i].Total * 100 / max)
+	}
+	return out, nil
+}
+
 func (s *Store) RecentChanges(ctx context.Context, limit int) ([]ChangeEvent, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,scope_key,target_id,action,revision,summary,actor,sensitive,created_at FROM change_events ORDER BY created_at DESC LIMIT ?`, clampLimit(limit, 100))
 	if err != nil {

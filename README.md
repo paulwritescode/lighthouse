@@ -174,7 +174,9 @@ Use `lighthouse.OpenDefault()` to open the same database used by the CLI and das
 
 ## Run the dashboard
 
-The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. The CLI can also add a `lighthouse` entry to the local hosts file so you can use `http://lighthouse:8080`. It uses Go templates, CSS, and native HTML forms—no React, HTMX, Node runtime, or browser JavaScript bundle. The overview shows record counts, seven-day activity, security status, and the current SQLite footprint: database file plus active `-wal` file. Transient shared-memory and unrelated filesystem allocation are excluded.
+The optional dashboard binds to `127.0.0.1:8080`; open `http://127.0.0.1:8080` or `http://lighthouse.localhost:8080`. The CLI can also add a `lighthouse` entry to the local hosts file so you can use `http://lighthouse:8080`. It uses embedded Go templates, CSS, native forms, and a small local script for theme switching and browser confirmation dialogs. No Node runtime, frontend build, React, or CSS framework is required to install or run Lighthouse.
+
+The dark-default dashboard has a light-mode switch saved in the browser. Overview shows record counts, seven-day activity, record mix, top project keys, recent results, and the current SQLite footprint (database file plus active `-wal` file). Projects groups existing result and memory project keys without adding a separate project entity. Activity holds safeguards and the audit trail. Data tools holds import and export.
 
 The Results and Memory screens support individual CRUD, manually selected batches, and all records matching the active filters. Bulk result edits can set project, kind, or agent; bulk memory edits can set project or kind. The Results screen links to batch import. Bulk deletes require confirmation; bulk writes are audited per record and capped at 10,000 records. The tables show the newest 50 results and 100 memory items; “select every matching” applies the filters to the full set up to the cap.
 

@@ -63,3 +63,12 @@ type Counts struct {
 	Changes       int64 `json:"changes"`
 	SecurityFlags int64 `json:"security_flags"`
 }
+
+// ProjectSummary groups existing project keys across results and active memory.
+type ProjectSummary struct {
+	Name     string
+	Results  int64
+	Memories int64
+	Total    int64
+	BarWidth int
+}
