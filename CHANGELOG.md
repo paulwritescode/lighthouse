@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.3 — 2026-11-10
+
+### Fixed
+
+- Re-enable the macOS user LaunchAgent before loading it, including when an earlier service removal left it disabled.
+- Retry a transient `launchctl bootstrap` error while a previous service instance finishes unloading.
+- Explain that the startup service must be installed from the signed-in account without `sudo`.
+
 ## 0.4.2 — 2026-11-10
 
 ### Fixed

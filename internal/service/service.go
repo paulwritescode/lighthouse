@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -163,6 +164,9 @@ func (m *Manager) launchdDomain() string {
 }
 
 func (m *Manager) installLaunchAgent() error {
+	if os.Geteuid() == 0 {
+		return errors.New("install the Lighthouse user service without sudo; launchd must run it in your signed-in session")
+	}
 	path, err := m.launchAgentPath()
 	if err != nil {
 		return err
@@ -178,14 +182,33 @@ func (m *Manager) installLaunchAgent() error {
 	if err := atomicWrite(path, []byte(content), 0o600); err != nil {
 		return err
 	}
-	_ = runQuiet("launchctl", "bootout", m.launchdTarget())
-	if err := m.launchctl("bootstrap", m.launchdDomain(), path); err != nil {
-		return err
-	}
 	if err := m.launchctl("enable", m.launchdTarget()); err != nil {
 		return err
 	}
+	_ = runQuiet("launchctl", "bootout", m.launchdTarget())
+	if err := m.bootstrapLaunchAgent(path); err != nil {
+		return err
+	}
 	return m.Start()
+}
+
+func (m *Manager) bootstrapLaunchAgent(path string) error {
+	var lastErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		output, err := exec.Command("launchctl", "bootstrap", m.launchdDomain(), path).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		lastErr = fmt.Errorf("launchctl bootstrap: %w: %s", err, strings.TrimSpace(string(output)))
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 5 {
+			return lastErr
+		}
+		if attempt < 5 {
+			time.Sleep(time.Duration(1<<attempt) * 200 * time.Millisecond)
+		}
+	}
+	return fmt.Errorf("load Lighthouse user service after launchd retries: %w", lastErr)
 }
 
 func launchAgentContent(executable, database, logDir string) string {
