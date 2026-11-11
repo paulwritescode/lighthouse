@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 — 2026-11-11
+
 ### Added
 
 - Render saved result and memory Markdown as readable dashboard content, with full memory and project detail pages.
@@ -10,6 +12,7 @@
 ### Changed
 
 - Refresh the dashboard with a white canvas, native system typography, black pill controls, and quieter borders.
+- Keep chart and local-status cues distinct with restrained sky-blue and green accents.
 
 ## 0.6.1 — 2026-11-10
 

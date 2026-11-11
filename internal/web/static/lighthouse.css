@@ -1159,21 +1159,21 @@ td strong {
   }
 }
 
-/* Lighthouse visual system: paper white, black pills, quiet hairlines and native type. */
-:root,:root[data-theme=light],:root[data-theme=dark] {
+/* Lighthouse visual system: paper white, black controls, sky accents and native type. */
+:root,:root[data-theme=light] {
   color-scheme: light;
-  --bg: #fff; --surface: #fff; --surface-2: #fafafa; --ink: #000; --muted: #737373;
-  --line: #e5e5e5; --accent: #000; --green: #525252; --danger: #a33;
+  --bg: #fff; --surface: #fff; --surface-2: #f1f8fb; --ink: #111; --muted: #666;
+  --line: #dfe7eb; --accent: #287b9c; --green: #3b795d; --danger: #a33;
   --field: #fff; --button-ink: #fff;
   font-family: ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   background: var(--bg); color: var(--ink);
 }
-body { background: #fff; color: #000; }
+body { background: radial-gradient(ellipse at 92% 0, rgb(189 229 245 / 24%), transparent 34rem), #fff; color: #111; }
 h1,h2,h3,.wordmark,.metric strong { font-family: "SF Pro Rounded",ui-rounded,system-ui,-apple-system,sans-serif; }
 .topbar { background: #fff; }
 .topbar-inner { min-height: 3.5rem; }
 .nav a { border-bottom: 0; border-radius: 999px; padding: .45rem .8rem; }
-.nav a[aria-current=page] { background: #fafafa; font-weight: 600; }
+.nav a[aria-current=page] { background: #eef8fc; color: #111; font-weight: 600; }
 .theme-toggle,.button,.status-pill,.flag-pill,.record-kind { border-radius: 999px; }
 .theme-toggle { background: #fff; color: #000; }
 .button { min-height: 2.4rem; padding: .55rem 1.15rem; background: #000; border-color: #000; color: #fff; box-shadow: none; }
@@ -1181,7 +1181,7 @@ h1,h2,h3,.wordmark,.metric strong { font-family: "SF Pro Rounded",ui-rounded,sys
 .button-secondary { background: #fff; color: #000; border-color: #d4d4d4; }
 .button-secondary:hover { background: #fafafa; color: #000; border-color: #a3a3a3; }
 .panel,.bulk-panel,.inline-tool { border-radius: 12px; box-shadow: none; background: #fff; }
-.metrics { border: 1px solid #e5e5e5; border-radius: 12px; background: #e5e5e5; }
+.metrics { border: 1px solid #d8edf6; border-radius: 12px; background: #d8edf6; }
 .metric { background: #fff; }
 .metric strong { font-weight: 600; }
 th { background: #fafafa; }
