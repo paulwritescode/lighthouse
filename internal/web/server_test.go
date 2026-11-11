@@ -60,8 +60,8 @@ func TestDashboardPagesGroupExistingProjectRecords(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("GET %s status = %d", route, response.Code)
 		}
-		if !strings.Contains(response.Body.String(), `data-theme="dark"`) {
-			t.Fatalf("GET %s is missing the dark default theme", route)
+		if !strings.Contains(response.Body.String(), `data-theme="light"`) {
+			t.Fatalf("GET %s is missing the light default theme", route)
 		}
 	}
 	projects := httptest.NewRecorder()

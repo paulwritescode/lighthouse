@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -9,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"html/template"
 	"io"
 	"io/fs"
@@ -18,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -26,6 +29,7 @@ import (
 
 	"github.com/paulwritescode/lighthouse/internal/store"
 	"github.com/paulwritescode/lighthouse/internal/transfer"
+	"github.com/yuin/goldmark"
 )
 
 //go:embed templates/*.html static/* static/fonts/*
@@ -69,6 +73,9 @@ type pageData struct {
 	Notice         string
 	SelectAll      bool
 	BulkAll        bool
+	Memory         *store.Memory
+	PageNumber     int
+	TotalPages     int
 }
 
 func New(s *store.Store, dbPath string) (*Server, error) {
@@ -80,7 +87,7 @@ func New(s *store.Store, dbPath string) (*Server, error) {
 }
 
 func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
-	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "short": func(v string, n int) string {
+	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "markdown": renderMarkdown, "markdownText": markdownText, "add": func(a, b int) int { return a + b }, "sub": func(a, b int) int { return a - b }, "short": func(v string, n int) string {
 		if len(v) <= n {
 			return v
 		}
@@ -159,7 +166,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /artifacts", s.artifacts)
 	mux.HandleFunc("GET /artifacts/{id}", s.artifact)
 	mux.HandleFunc("GET /memory", s.memory)
+	mux.HandleFunc("GET /memory/{id}", s.memoryDetail)
 	mux.HandleFunc("GET /projects", s.projects)
+	mux.HandleFunc("GET /projects/{name}", s.projectDetail)
 	mux.HandleFunc("GET /activity", s.activity)
 	mux.HandleFunc("GET /data", s.dataTools)
 	mux.HandleFunc("POST /data/erase", s.eraseData)
@@ -234,10 +243,74 @@ func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, d)
 }
 
+func (s *Server) memoryDetail(w http.ResponseWriter, r *http.Request) {
+	m, err := s.store.GetMemory(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	d := pageData{Page: "memory-detail", Title: m.Key, Memory: &m, DBPath: s.dbPath}
+	d.Counts, _ = s.store.Counts(r.Context())
+	s.render(w, http.StatusOK, d)
+}
+
+func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	projects, _ := s.store.ProjectSummaries(r.Context())
+	found := false
+	for _, p := range projects {
+		if p.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	a, _ := s.store.SearchSorted(r.Context(), "", name, 500, "newest")
+	m, _ := s.store.ListMemorySorted(r.Context(), name, 500, "newest")
+	d := pageData{Page: "project-detail", Title: name, Project: name, Artifacts: a, Memories: m, DBPath: s.dbPath}
+	d.Counts, _ = s.store.Counts(r.Context())
+	s.render(w, http.StatusOK, d)
+}
+
+func renderMarkdown(source string) template.HTML {
+	var out bytes.Buffer
+	if err := goldmark.Convert([]byte(source), &out); err != nil {
+		return template.HTML(template.HTMLEscapeString(source))
+	}
+	// Goldmark escapes raw HTML by default. Keep links to ordinary web, mail, anchor and local paths.
+	html := out.String()
+	unsafeHref := regexp.MustCompile(`(?i)(href|src)="(?:javascript|data|vbscript):[^"]*"`)
+	html = unsafeHref.ReplaceAllString(html, `$1="#"`)
+	return template.HTML(html)
+}
+
+func markdownText(source string) string {
+	rendered := string(renderMarkdown(source))
+	rendered = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(rendered, " ")
+	rendered = html.UnescapeString(rendered)
+	return strings.Join(strings.Fields(rendered), " ")
+}
+
 func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 	d := pageData{Page: "activity", Title: "Activity", DBPath: s.dbPath}
-	d.Changes, _ = s.store.RecentChanges(r.Context(), 100)
 	d.Counts, _ = s.store.Counts(r.Context())
+	const pageSize = 25
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	d.TotalPages = int((d.Counts.Changes + pageSize - 1) / pageSize)
+	if d.TotalPages < 1 {
+		d.TotalPages = 1
+	}
+	if page > d.TotalPages {
+		page = d.TotalPages
+	}
+	d.PageNumber = page
+	d.Changes, _ = s.store.RecentChangesPage(r.Context(), pageSize, (page-1)*pageSize)
 	d.Activity, _ = s.store.WeeklyActivity(r.Context())
 	s.render(w, http.StatusOK, d)
 }

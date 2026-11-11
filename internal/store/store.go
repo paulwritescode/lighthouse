@@ -1204,7 +1204,14 @@ func (s *Store) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) 
 }
 
 func (s *Store) RecentChanges(ctx context.Context, limit int) ([]ChangeEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,scope_key,target_id,action,revision,summary,actor,sensitive,created_at FROM change_events ORDER BY created_at DESC LIMIT ?`, clampLimit(limit, 100))
+	return s.RecentChangesPage(ctx, limit, 0)
+}
+
+func (s *Store) RecentChangesPage(ctx context.Context, limit, offset int) ([]ChangeEvent, error) {
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,scope_key,target_id,action,revision,summary,actor,sensitive,created_at FROM change_events ORDER BY created_at DESC LIMIT ? OFFSET ?`, clampLimit(limit, 100), offset)
 	if err != nil {
 		return nil, err
 	}
