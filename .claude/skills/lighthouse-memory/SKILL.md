@@ -41,3 +41,25 @@ Use `describe(project="...")` to learn the fixed artifact fields and custom fiel
 Use `delete(id)` or `delete_memory(id)` only when the user's task explicitly calls for deletion. Memory is normally revised with `upsert_memory(key=..., body=...)`. `audit(limit=...)` returns recent changes and flags updates, imports, deletes, and other security-relevant operations. Emit the audit rows when the user asks for change review. Never use raw SQL or filesystem access from the code call.
 
 Use `lighthouse export --format json|md|yaml|toml|pdf|db` and `lighthouse import --format ...` for portability. The dashboard has matching import/export controls. PDF exports are readable reports; imported PDF files are stored as bounded raw attachments without text extraction. SQLite imports merge records and skip duplicate artifact IDs and active memory keys; they do not replace the live database.
+
+## Readable artifact and source conventions
+
+When saving research or project results, write the main `content` as readable Markdown with descriptive headings and short sections. The Lighthouse dashboard renders GitHub-Flavored Markdown tables, headings, lists, emphasis, and links. Store nested rankings, metrics, and sources as JSON-compatible arrays and objects in `fields`; never flatten them into strings or JSON text. Keep the human-readable content understandable on its own. Prefer named numeric values under `fields.metrics` for dashboard metric cards, and include units or definitions in field names or nearby Markdown.
+
+Represent each source as a structured object, for example:
+
+```json
+{
+  "id": "stable-source-id",
+  "title": "Descriptive source title",
+  "type": "user_provided_attachment",
+  "url": "https://example.com/specific-page",
+  "path": "/absolute/path/to/local-file",
+  "artifact_id": "existing-lighthouse-artifact-id",
+  "attribution": "Who supplied or published it",
+  "captured_at": "YYYY-MM-DD",
+  "limitations": "What this source does not establish"
+}
+```
+
+Use only locator fields that apply. Prefer the exact page or post URL; if only an account/profile URL is known, label it as an account or profile link and do not imply it points to a specific post. Link existing Lighthouse results with `artifact_id`. Preserve local file or directory paths as absolute `path` values; they are copyable in the dashboard but are not browser links or opened there. Distinguish `local_file` from `local_directory`. Preserve attribution, capture date when known, type, and limitations. Do not alter the database schema or write directly to SQLite.

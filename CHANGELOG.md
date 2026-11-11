@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.8.0 — 2026-11-11
+
+### Added
+
+- Render research tables as accessible, scrollable Markdown tables and show nested custom fields as structured values, source cards, and metric cards.
+- Add safe web and Lighthouse artifact links plus copyable local source paths.
+- Document structured research and source storage in the agent skills.
+
+### Fixed
+
+- Mark the active dashboard navigation item with bold text and an underline without the blue rounded background.
+
 ## 0.7.0 — 2026-11-11
 
 ### Added

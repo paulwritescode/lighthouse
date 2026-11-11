@@ -16,6 +16,69 @@ import (
 
 var csrfInputPattern = regexp.MustCompile(`<input type="hidden" name="csrf_token" value="([a-f0-9]{64})">`)
 
+func TestArtifactMarkdownAndStructuredFieldsRenderReadably(t *testing.T) {
+	markdown := string(renderMarkdown("| Name | Score |\n| --- | ---: |\n| Alpha | 4 |\n\n| Status | Count |\n| --- | ---: |\n| Ready | 2 |\n\n[Source](https://example.com/research)"))
+	for _, want := range []string{`<table>`, `<th scope="col">Name</th>`, `<th scope="col" style="text-align:right">Score</th>`, `<td>Alpha</td>`, `target="_blank" rel="noopener noreferrer"`} {
+		if !strings.Contains(markdown, want) {
+			t.Errorf("rendered Markdown missing %q: %s", want, markdown)
+		}
+	}
+	if strings.Count(markdown, "<table>") != 2 || strings.Contains(markdown, "| Alpha | 4 |") {
+		t.Fatalf("expected both tables to render without literal pipe rows: %s", markdown)
+	}
+	malformed := string(renderMarkdown("| Name | Score |\n| -- |\n| Alpha | 4 |"))
+	if strings.Contains(malformed, "|") || !strings.Contains(malformed, "Name · Score") || !strings.Contains(malformed, "Alpha · 4") {
+		t.Fatalf("malformed table did not get a readable fallback: %s", malformed)
+	}
+
+	fields := string(renderFields(map[string]any{
+		"ranking": map[string]any{"score": float64(8), "notes": []any{"clear", "relevant"}},
+		"metrics": map[string]any{"coverage": float64(92), "confidence": float64(.88)},
+		"sources": []any{map[string]any{"title": "Instagram account", "type": "social_account", "url": "https://instagram.com/example", "attribution": "Public profile", "limitations": "Account, not a specific post"}, map[string]any{"title": "Local notes", "type": "local_file", "path": "/tmp/research/notes.md"}, map[string]any{"title": "Earlier result", "artifact_id": "d61212ddd19ad0072db5945d37012db6"}, map[string]any{"title": "Missing record"}},
+		"unsafe":  `<script>alert(1)</script>`,
+	}))
+	for _, want := range []string{"ranking", "score", "clear", "artifact-metrics", "Instagram account", `href="https://instagram.com/example" target="_blank" rel="noopener noreferrer"`, "Account, not a specific post", `data-copy-path="/tmp/research/notes.md"`, "Copy path", "This local file cannot be opened in the browser", `href="/artifacts/d61212ddd19ad0072db5945d37012db6"`, "This source has no openable locator", "&lt;script&gt;"} {
+		if !strings.Contains(fields, want) {
+			t.Errorf("rendered custom fields missing %q: %s", want, fields)
+		}
+	}
+	if strings.Contains(fields, "map[") {
+		t.Fatal("custom fields included a Go map representation")
+	}
+}
+
+func TestArtifactDetailUsesReadableMarkdownAndCustomFieldRenderers(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/lighthouse.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	artifact, err := db.SaveArtifactFields(t.Context(), "Research review", "| Topic | Score |\n| --- | ---: |\n| Result | 9 |", "research", "test", "result", map[string]any{
+		"ranking": map[string]any{"score": float64(9)},
+		"sources": []any{map[string]any{"title": "Source profile", "url": "https://example.com/profile", "type": "social_account", "limitations": "Profile link, not a specific post"}, map[string]any{"title": "Local evidence", "path": "/tmp/evidence.md", "type": "local_file"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := newWithCSRFPath(db, "test.db", t.TempDir()+"/csrf-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://localhost:8080/artifacts/"+artifact.ID, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET artifact detail status = %d", response.Code)
+	}
+	for _, want := range []string{`<th scope="col">Topic</th>`, `<td>Result</td>`, `class="source-cards"`, "ranking", "Profile link, not a specific post", `data-copy-path="/tmp/evidence.md"`, "This local file cannot be opened in the browser"} {
+		if !strings.Contains(response.Body.String(), want) {
+			t.Errorf("artifact detail missing %q", want)
+		}
+	}
+	if strings.Contains(response.Body.String(), "map[") {
+		t.Fatal("artifact detail rendered a Go map representation")
+	}
+}
+
 func TestLoadCSRFTokenPersistsWithPrivatePermissions(t *testing.T) {
 	path := t.TempDir() + "/config/csrf-token"
 	first, err := loadCSRFToken(path)

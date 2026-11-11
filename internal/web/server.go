@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ import (
 	"github.com/paulwritescode/lighthouse/internal/store"
 	"github.com/paulwritescode/lighthouse/internal/transfer"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 )
 
 //go:embed templates/*.html static/* static/fonts/*
@@ -87,7 +89,7 @@ func New(s *store.Store, dbPath string) (*Server, error) {
 }
 
 func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
-	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "markdown": renderMarkdown, "markdownText": markdownText, "add": func(a, b int) int { return a + b }, "sub": func(a, b int) int { return a - b }, "short": func(v string, n int) string {
+	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "markdown": renderMarkdown, "markdownText": markdownText, "renderFields": renderFields, "add": func(a, b int) int { return a + b }, "sub": func(a, b int) int { return a - b }, "short": func(v string, n int) string {
 		if len(v) <= n {
 			return v
 		}
@@ -277,14 +279,234 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request) {
 
 func renderMarkdown(source string) template.HTML {
 	var out bytes.Buffer
-	if err := goldmark.Convert([]byte(source), &out); err != nil {
-		return template.HTML(template.HTMLEscapeString(source))
+	md := goldmark.New(goldmark.WithExtensions(extension.GFM))
+	if err := md.Convert([]byte(source), &out); err != nil {
+		return template.HTML(template.HTMLEscapeString(readableMarkdownFallback(source)))
 	}
-	// Goldmark escapes raw HTML by default. Keep links to ordinary web, mail, anchor and local paths.
-	html := out.String()
-	unsafeHref := regexp.MustCompile(`(?i)(href|src)="(?:javascript|data|vbscript):[^"]*"`)
-	html = unsafeHref.ReplaceAllString(html, `$1="#"`)
-	return template.HTML(html)
+	if markdownTableLike.MatchString(source) && !strings.Contains(out.String(), "<table>") {
+		return template.HTML(template.HTMLEscapeString(readableMarkdownFallback(source)))
+	}
+	// Goldmark escapes raw HTML by default. Make safe external links explicit and reject
+	// executable schemes while preserving local dashboard routes and anchors.
+	rendered := out.String()
+	rendered = strings.ReplaceAll(rendered, `<th>`, `<th scope="col">`)
+	rendered = strings.ReplaceAll(rendered, `<th style=`, `<th scope="col" style=`)
+	hrefPattern := regexp.MustCompile(`href="([^"]*)"`)
+	rendered = hrefPattern.ReplaceAllStringFunc(rendered, func(match string) string {
+		parts := hrefPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return `href="#"`
+		}
+		href := html.UnescapeString(parts[1])
+		parsed, err := url.Parse(href)
+		if err != nil || (parsed.Scheme != "" && parsed.Scheme != "http" && parsed.Scheme != "https" && parsed.Scheme != "mailto") {
+			return `href="#"`
+		}
+		safeHref := template.HTMLEscapeString(href)
+		if parsed.Scheme == "http" || parsed.Scheme == "https" {
+			return `href="` + safeHref + `" target="_blank" rel="noopener noreferrer"`
+		}
+		return `href="` + safeHref + `"`
+	})
+	srcPattern := regexp.MustCompile(`src="([^"]*)"`)
+	rendered = srcPattern.ReplaceAllStringFunc(rendered, func(match string) string {
+		parts := srcPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return `src="#"`
+		}
+		parsed, err := url.Parse(html.UnescapeString(parts[1]))
+		if err != nil || (parsed.Scheme != "" && parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return `src="#"`
+		}
+		return `src="` + template.HTMLEscapeString(html.UnescapeString(parts[1])) + `"`
+	})
+	// GFM emits semantic <th> cells. A focusable region lets keyboard and touch users
+	// scroll wide tables without squeezing the rest of the artifact body.
+	rendered = strings.ReplaceAll(rendered, "<table>", `<div class="markdown-table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table>`)
+	rendered = strings.ReplaceAll(rendered, "</table>", "</table></div>")
+	return template.HTML(rendered)
+}
+
+var markdownTableLike = regexp.MustCompile(`(?m)^\s*\|[^\n]*\|\s*\n\s*\|[^\n]*-{2,}[^\n]*\|\s*$`)
+
+func readableMarkdownFallback(source string) string {
+	lines := strings.Split(source, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "|") {
+			cells := strings.Split(strings.Trim(trimmed, "|"), "|")
+			separator := true
+			for j := range cells {
+				cells[j] = strings.TrimSpace(cells[j])
+				if strings.Trim(cells[j], ":- ") != "" {
+					separator = false
+				}
+			}
+			if separator {
+				lines[i] = ""
+			} else {
+				lines[i] = strings.Join(cells, " · ")
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderFields(fields map[string]any) template.HTML {
+	var b strings.Builder
+	for _, key := range sortedFieldKeys(fields) {
+		value := fields[key]
+		b.WriteString(`<section class="custom-field"><h3>` + html.EscapeString(key) + `</h3>`)
+		if key == "base64" {
+			b.WriteString(`<p>Binary attachment stored (base64 encoded)</p>`)
+		} else if key == "sources" {
+			b.WriteString(renderSources(value))
+		} else if key == "metrics" {
+			b.WriteString(renderMetrics(value))
+		} else {
+			b.WriteString(renderJSONValue(value))
+		}
+		b.WriteString(`</section>`)
+	}
+	return template.HTML(b.String())
+}
+
+func sortedFieldKeys(fields map[string]any) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func renderJSONValue(value any) string {
+	switch v := value.(type) {
+	case map[string]any:
+		var b strings.Builder
+		b.WriteString(`<dl class="structured-fields">`)
+		for _, key := range sortedFieldKeys(v) {
+			child := v[key]
+			b.WriteString(`<div><dt>` + html.EscapeString(key) + `</dt><dd>` + renderJSONValue(child) + `</dd></div>`)
+		}
+		b.WriteString(`</dl>`)
+		return b.String()
+	case []any:
+		var b strings.Builder
+		objects := false
+		for _, child := range v {
+			if _, ok := child.(map[string]any); ok {
+				objects = true
+				break
+			}
+		}
+		if objects {
+			b.WriteString(`<div class="structured-cards">`)
+			for _, child := range v {
+				b.WriteString(`<article class="structured-card">` + renderJSONValue(child) + `</article>`)
+			}
+			b.WriteString(`</div>`)
+			return b.String()
+		}
+		b.WriteString(`<ul class="structured-list">`)
+		for _, child := range v {
+			b.WriteString(`<li>` + renderJSONValue(child) + `</li>`)
+		}
+		b.WriteString(`</ul>`)
+		return b.String()
+	case string:
+		return html.EscapeString(v)
+	case nil:
+		return `<span class="muted">Not provided</span>`
+	default:
+		return html.EscapeString(fmt.Sprint(v))
+	}
+}
+
+func renderSources(value any) string {
+	items, ok := value.([]any)
+	if !ok {
+		return renderJSONValue(value)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="source-cards">`)
+	for _, item := range items {
+		source, ok := item.(map[string]any)
+		if !ok {
+			b.WriteString(`<article class="source-card"><p>` + renderJSONValue(item) + `</p></article>`)
+			continue
+		}
+		title := sourceString(source, "title", "name", "id")
+		if title == "" {
+			title = "Untitled source"
+		}
+		b.WriteString(`<article class="source-card"><h4>` + html.EscapeString(title) + `</h4><dl class="source-meta">`)
+		for _, key := range []string{"type", "attribution", "captured_at", "limitations"} {
+			if text := sourceString(source, key); text != "" {
+				b.WriteString(`<div><dt>` + html.EscapeString(strings.ReplaceAll(key, "_", " ")) + `</dt><dd>` + html.EscapeString(text) + `</dd></div>`)
+			}
+		}
+		b.WriteString(`</dl>`)
+		opened := false
+		if locator := sourceString(source, "url"); locator != "" {
+			if safeWebURL(locator) {
+				b.WriteString(`<p><a href="` + html.EscapeString(locator) + `" target="_blank" rel="noopener noreferrer">Open source ↗</a></p>`)
+				opened = true
+			} else {
+				b.WriteString(`<p class="source-unavailable">This web source could not be opened safely.</p>`)
+				opened = true
+			}
+		} else if artifactID := sourceString(source, "artifact_id", "lighthouse_artifact_id", "source_id"); artifactID != "" {
+			if regexp.MustCompile(`^[a-fA-F0-9]{16,64}$`).MatchString(artifactID) {
+				b.WriteString(`<p><a href="/artifacts/` + url.PathEscape(artifactID) + `">Open Lighthouse result</a></p>`)
+			} else {
+				b.WriteString(`<p class="source-unavailable">This Lighthouse result could not be opened.</p>`)
+			}
+			opened = true
+		}
+		if path := sourceString(source, "path", "local_path"); path != "" {
+			b.WriteString(`<p class="source-locator"><code>` + html.EscapeString(path) + `</code> <button class="button button-secondary copy-path" type="button" data-copy-path="` + html.EscapeString(path) + `">Copy path</button></p>`)
+			if sourceString(source, "type") == "local_file" || sourceString(source, "type") == "file" {
+				b.WriteString(`<p class="source-unavailable">This local file cannot be opened in the browser.</p>`)
+			}
+			opened = true
+		}
+		if !opened {
+			b.WriteString(`<p class="source-unavailable">This source has no openable locator.</p>`)
+		}
+		b.WriteString(`</article>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func renderMetrics(value any) string {
+	values, ok := value.(map[string]any)
+	if !ok || len(values) == 0 {
+		return renderJSONValue(value)
+	}
+	var b strings.Builder
+	b.WriteString(`<div class="artifact-metrics">`)
+	for _, key := range sortedFieldKeys(values) {
+		item := values[key]
+		b.WriteString(`<div class="artifact-metric"><span>` + html.EscapeString(key) + `</span><strong>` + renderJSONValue(item) + `</strong></div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
+func sourceString(source map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := source[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func safeWebURL(raw string) bool {
+	u, err := url.ParseRequestURI(raw)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 func markdownText(source string) string {
