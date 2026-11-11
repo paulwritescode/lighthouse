@@ -17,6 +17,14 @@ import (
 var csrfInputPattern = regexp.MustCompile(`<input type="hidden" name="csrf_token" value="([a-f0-9]{64})">`)
 
 func TestArtifactMarkdownAndStructuredFieldsRenderReadably(t *testing.T) {
+	outline := markdownOutline("## Preliminary actionable ranking\n\n### Source register")
+	if len(outline) != 2 || outline[0].ID != "preliminary-actionable-ranking" || outline[0].Level != 2 || outline[1].ID != "source-register" || outline[1].Level != 3 {
+		t.Fatalf("Markdown outline IDs/levels = %#v", outline)
+	}
+	shifted := string(renderArtifactMarkdown("## Research details\n\n### Subsection"))
+	if !strings.Contains(shifted, `<h3 id="research-details">`) || !strings.Contains(shifted, `<h4 id="subsection">`) {
+		t.Fatalf("artifact headings were not shifted below the record title: %s", shifted)
+	}
 	markdown := string(renderMarkdown("| Name | Score |\n| --- | ---: |\n| Alpha | 4 |\n\n| Status | Count |\n| --- | ---: |\n| Ready | 2 |\n\n[Source](https://example.com/research)"))
 	for _, want := range []string{`<table>`, `<th scope="col">Name</th>`, `<th scope="col" style="text-align:right">Score</th>`, `<td>Alpha</td>`, `target="_blank" rel="noopener noreferrer"`} {
 		if !strings.Contains(markdown, want) {
@@ -53,7 +61,7 @@ func TestArtifactDetailUsesReadableMarkdownAndCustomFieldRenderers(t *testing.T)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	artifact, err := db.SaveArtifactFields(t.Context(), "Research review", "| Topic | Score |\n| --- | ---: |\n| Result | 9 |", "research", "test", "result", map[string]any{
+	artifact, err := db.SaveArtifactFields(t.Context(), "Research review", "## Research review\n\n| Topic | Score |\n| --- | ---: |\n| Result | 9 |", "research", "test", "result", map[string]any{
 		"ranking": map[string]any{"score": float64(9)},
 		"sources": []any{map[string]any{"title": "Source profile", "url": "https://example.com/profile", "type": "social_account", "limitations": "Profile link, not a specific post"}, map[string]any{"title": "Local evidence", "path": "/tmp/evidence.md", "type": "local_file"}},
 	})
@@ -69,7 +77,7 @@ func TestArtifactDetailUsesReadableMarkdownAndCustomFieldRenderers(t *testing.T)
 	if response.Code != http.StatusOK {
 		t.Fatalf("GET artifact detail status = %d", response.Code)
 	}
-	for _, want := range []string{`<th scope="col">Topic</th>`, `<td>Result</td>`, `class="source-cards"`, "ranking", "Profile link, not a specific post", `data-copy-path="/tmp/evidence.md"`, "This local file cannot be opened in the browser"} {
+	for _, want := range []string{`<nav class="artifact-outline"`, `href="#research-review"`, `<h3 id="research-review">`, `<th scope="col">Topic</th>`, `<td>Result</td>`, `class="source-cards"`, "ranking", "Profile link, not a specific post", `data-copy-path="/tmp/evidence.md"`, "This local file cannot be opened in the browser"} {
 		if !strings.Contains(response.Body.String(), want) {
 			t.Errorf("artifact detail missing %q", want)
 		}

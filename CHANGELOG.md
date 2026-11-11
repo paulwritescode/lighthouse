@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.8.1 — 2026-11-11
+
+### Fixed
+
+- Give artifact Markdown tables the full dashboard width, preserve readable prose line lengths, and add responsive table scrolling with section links.
+
 ## 0.8.0 — 2026-11-11
 
 ### Added

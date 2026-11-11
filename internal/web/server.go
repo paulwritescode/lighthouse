@@ -31,7 +31,10 @@ import (
 	"github.com/paulwritescode/lighthouse/internal/store"
 	"github.com/paulwritescode/lighthouse/internal/transfer"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/parser"
+	"github.com/yuin/goldmark/text"
 )
 
 //go:embed templates/*.html static/* static/fonts/*
@@ -80,6 +83,12 @@ type pageData struct {
 	TotalPages     int
 }
 
+type markdownHeading struct {
+	ID    string
+	Title string
+	Level int
+}
+
 func New(s *store.Store, dbPath string) (*Server, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
@@ -89,7 +98,7 @@ func New(s *store.Store, dbPath string) (*Server, error) {
 }
 
 func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
-	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "markdown": renderMarkdown, "markdownText": markdownText, "renderFields": renderFields, "add": func(a, b int) int { return a + b }, "sub": func(a, b int) int { return a - b }, "short": func(v string, n int) string {
+	funcs := template.FuncMap{"date": func(t time.Time) string { return t.Local().Format("Jan 2, 2006 · 3:04 PM") }, "join": func(values []string) string { return strings.Join(values, ", ") }, "markdown": renderMarkdown, "artifactMarkdown": renderArtifactMarkdown, "markdownOutline": markdownOutline, "markdownText": markdownText, "renderFields": renderFields, "add": func(a, b int) int { return a + b }, "sub": func(a, b int) int { return a - b }, "short": func(v string, n int) string {
 		if len(v) <= n {
 			return v
 		}
@@ -277,9 +286,26 @@ func (s *Server) projectDetail(w http.ResponseWriter, r *http.Request) {
 	s.render(w, http.StatusOK, d)
 }
 
+func newMarkdownRenderer() goldmark.Markdown {
+	return goldmark.New(
+		goldmark.WithExtensions(extension.GFM),
+		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+	)
+}
+
 func renderMarkdown(source string) template.HTML {
+	return renderMarkdownWithHeadingShift(source, 0)
+}
+
+func renderArtifactMarkdown(source string) template.HTML {
+	// Artifact content is nested under the artifact title, so its Markdown headings
+	// start one level lower in the page outline.
+	return renderMarkdownWithHeadingShift(source, 1)
+}
+
+func renderMarkdownWithHeadingShift(source string, shift int) template.HTML {
 	var out bytes.Buffer
-	md := goldmark.New(goldmark.WithExtensions(extension.GFM))
+	md := newMarkdownRenderer()
 	if err := md.Convert([]byte(source), &out); err != nil {
 		return template.HTML(template.HTMLEscapeString(readableMarkdownFallback(source)))
 	}
@@ -289,6 +315,9 @@ func renderMarkdown(source string) template.HTML {
 	// Goldmark escapes raw HTML by default. Make safe external links explicit and reject
 	// executable schemes while preserving local dashboard routes and anchors.
 	rendered := out.String()
+	if shift > 0 {
+		rendered = shiftMarkdownHeadings(rendered, shift)
+	}
 	rendered = strings.ReplaceAll(rendered, `<th>`, `<th scope="col">`)
 	rendered = strings.ReplaceAll(rendered, `<th style=`, `<th scope="col" style=`)
 	hrefPattern := regexp.MustCompile(`href="([^"]*)"`)
@@ -325,6 +354,58 @@ func renderMarkdown(source string) template.HTML {
 	rendered = strings.ReplaceAll(rendered, "<table>", `<div class="markdown-table-wrap" role="region" aria-label="Scrollable data table" tabindex="0"><table>`)
 	rendered = strings.ReplaceAll(rendered, "</table>", "</table></div>")
 	return template.HTML(rendered)
+}
+
+func shiftMarkdownHeadings(rendered string, shift int) string {
+	headingTag := regexp.MustCompile(`</?h([1-6])([\s>])`)
+	return headingTag.ReplaceAllStringFunc(rendered, func(tag string) string {
+		matches := headingTag.FindStringSubmatch(tag)
+		if len(matches) != 3 {
+			return tag
+		}
+		level, _ := strconv.Atoi(matches[1])
+		level += shift
+		if level > 6 {
+			level = 6
+		}
+		return strings.Replace(tag, "h"+matches[1]+matches[2], "h"+strconv.Itoa(level)+matches[2], 1)
+	})
+}
+
+func markdownOutline(source string) []markdownHeading {
+	md := newMarkdownRenderer()
+	root := md.Parser().Parse(text.NewReader([]byte(source)))
+	headings := make([]markdownHeading, 0, 12)
+	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		heading, ok := node.(*ast.Heading)
+		if !ok || heading.Level < 2 || heading.Level > 3 {
+			return ast.WalkContinue, nil
+		}
+		id, ok := heading.AttributeString("id")
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		title := strings.TrimSpace(string(heading.Text([]byte(source))))
+		if title == "" {
+			return ast.WalkContinue, nil
+		}
+		headingID := ""
+		switch value := id.(type) {
+		case []byte:
+			headingID = string(value)
+		case string:
+			headingID = value
+		}
+		if headingID == "" {
+			return ast.WalkContinue, nil
+		}
+		headings = append(headings, markdownHeading{ID: headingID, Title: title, Level: heading.Level})
+		return ast.WalkContinue, nil
+	})
+	return headings
 }
 
 var markdownTableLike = regexp.MustCompile(`(?m)^\s*\|[^\n]*\|\s*\n\s*\|[^\n]*-{2,}[^\n]*\|\s*$`)
