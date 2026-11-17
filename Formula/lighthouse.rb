@@ -2,8 +2,8 @@ class Lighthouse < Formula
   desc "Local memory for coding agents"
   homepage "https://lighthouse.ovenplatform.com"
   url "https://github.com/paulwritescode/lighthouse.git",
-      tag:      "v0.8.1",
-      revision: "6a6666bf485638a0c44a27f1039d220ded24537e"
+      tag:      "v0.9.0",
+      revision: "6f55edacb2e2ad2043ef51bdf1b0bf53e88a04f3"
   license "MIT"
 
   depends_on "go" => :build
