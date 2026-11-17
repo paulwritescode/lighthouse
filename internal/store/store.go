@@ -43,7 +43,16 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	s := &Store{db: db}
-	if err := s.migrate(context.Background()); err != nil {
+	ctx := context.Background()
+	if err := s.refuseNewerSchema(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.migrate(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.upgrade(ctx, path); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -233,69 +242,12 @@ func (s *Store) SaveArtifactFields(ctx context.Context, title, content, project,
 }
 
 func (s *Store) SaveArtifactTagged(ctx context.Context, title, content, project, agent, kind string, fields map[string]any, tags []string, actors ...string) (Artifact, error) {
-	var err error
-	project, tags, err = NormalizeTags(project, tags)
-	if err != nil {
-		return Artifact{}, err
+	o := WriteOptions{}
+	if len(actors) > 0 {
+		o.Actor = actors[0]
 	}
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return Artifact{}, errors.New("title is required")
-	}
-	if strings.TrimSpace(content) == "" {
-		return Artifact{}, errors.New("content is required")
-	}
-	if len(content) > 2<<20 {
-		return Artifact{}, errors.New("content exceeds the 2 MiB limit")
-	}
-	if agent == "" {
-		agent = "unknown"
-	}
-	if kind == "" {
-		kind = "result"
-	}
-	now := time.Now().UTC()
-	id, err := newID()
-	if err != nil {
-		return Artifact{}, err
-	}
-	hash := sha256.Sum256([]byte(content))
-	if err := validateFields(fields); err != nil {
-		return Artifact{}, err
-	}
-	encodedFields, err := json.Marshal(fields)
-	if err != nil {
-		return Artifact{}, err
-	}
-	a := Artifact{ID: id, Title: title, Content: content, Project: project, Agent: agent, Kind: kind, CreatedAt: now, ContentHash: hex.EncodeToString(hash[:]), Fields: fields, Tags: tags}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Artifact{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifacts(id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, a.ID, a.Title, a.Content, a.Project, a.Agent, a.Kind, a.ContentHash, string(encodedFields), encodeTags(tags), now.Format(time.RFC3339Nano))
-	if err != nil {
-		return Artifact{}, fmt.Errorf("save artifact: %w", err)
-	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifacts_fts(artifact_id,title,content,project,agent) VALUES(?,?,?,?,?)`, a.ID, a.Title, a.Content+" "+string(encodedFields), a.Project, a.Agent)
-	if err != nil {
-		return Artifact{}, fmt.Errorf("index artifact: %w", err)
-	}
-	revision, err := bumpRevision(ctx, tx, project)
-	if err != nil {
-		return Artifact{}, err
-	}
-	actor := "agent"
-	if len(actors) > 0 && actors[0] != "" {
-		actor = actors[0]
-	}
-	if err = logChange(ctx, tx, project, a.ID, "artifact.saved", revision, "Saved "+a.Title, actor, actor == "dashboard"); err != nil {
-		return Artifact{}, err
-	}
-	if err = tx.Commit(); err != nil {
-		return Artifact{}, err
-	}
-	return a, nil
+	res, err := s.SaveArtifactWith(ctx, SaveInput{Title: title, Content: content, Project: project, Agent: agent, Kind: kind, Fields: fields, Tags: tags}, o)
+	return res.Artifact, err
 }
 
 func (s *Store) ImportArtifacts(ctx context.Context, artifacts []Artifact) (int, error) {
@@ -357,6 +309,14 @@ func (s *Store) ImportArtifacts(ctx context.Context, artifacts []Artifact) (int,
 		if inserted == 0 {
 			tx.Rollback()
 			continue
+		}
+		seq, err := recordChange(ctx, tx, a.ID, a.Kind, a.Project, "create", 1, "import", "")
+		if err == nil {
+			_, err = tx.ExecContext(ctx, `UPDATE artifacts SET seq=?,updated_at=?,actor='import' WHERE id=?`, seq, a.CreatedAt.UTC().Format(time.RFC3339Nano), a.ID)
+		}
+		if err != nil {
+			tx.Rollback()
+			return created, err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO artifacts_fts(artifact_id,title,content,project,agent) VALUES(?,?,?,?,?)`, a.ID, a.Title, a.Content+" "+string(fields), a.Project, a.Agent); err != nil {
 			tx.Rollback()
@@ -489,17 +449,9 @@ func ReadDatabase(ctx context.Context, path string) ([]Artifact, []Memory, error
 }
 
 func (s *Store) GetArtifact(ctx context.Context, id string) (Artifact, error) {
-	var a Artifact
-	var created, metadata, tagsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE id=?`, id).
-		Scan(&a.ID, &a.Title, &a.Content, &a.Project, &a.Agent, &a.Kind, &a.ContentHash, &metadata, &tagsJSON, &created)
-	if err != nil {
-		return Artifact{}, err
-	}
-	a.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
-	if err == nil {
-		a.Fields = decodeFields(metadata)
-		a.Tags = decodeTags(tagsJSON)
+	a, err := getTx(ctx, s.db, id)
+	if errors.Is(err, ErrNotFound) {
+		return Artifact{}, sql.ErrNoRows
 	}
 	return a, err
 }
@@ -535,148 +487,16 @@ func validateFields(fields map[string]any) error {
 }
 
 // UpdateArtifact applies known document attributes and merges arbitrary fields
-// into metadata_json. Unknown field names are preserved as document data.
+// into the record's fields. Unknown field names are preserved as document data.
 func (s *Store) UpdateArtifact(ctx context.Context, id string, patch map[string]any, actor string) (Artifact, error) {
-	a, err := s.GetArtifact(ctx, id)
-	if err != nil {
-		return Artifact{}, err
-	}
-	oldProject := a.Project
-	if a.Fields == nil {
-		a.Fields = map[string]any{}
-	}
-	var changed, sensitive bool
-	for key, value := range patch {
-		switch key {
-		case "title":
-			v, ok := value.(string)
-			if !ok || strings.TrimSpace(v) == "" {
-				return Artifact{}, errors.New("title must be a non-empty string")
-			}
-			a.Title = strings.TrimSpace(v)
-			changed = true
-		case "content":
-			v, ok := value.(string)
-			if !ok || strings.TrimSpace(v) == "" {
-				return Artifact{}, errors.New("content must be a non-empty string")
-			}
-			if len(v) > 2<<20 {
-				return Artifact{}, errors.New("content exceeds the 2 MiB limit")
-			}
-			a.Content = v
-			changed = true
-			sensitive = true
-		case "project":
-			v, ok := value.(string)
-			if !ok {
-				return Artifact{}, errors.New("project must be a string")
-			}
-			if v != a.Project {
-				sensitive = true
-			}
-			a.Project = v
-			changed = true
-		case "tags":
-			raw, ok := value.([]string)
-			if !ok {
-				if values, yes := value.([]any); yes {
-					raw = make([]string, 0, len(values))
-					for _, item := range values {
-						tag, yes := item.(string)
-						if !yes {
-							return Artifact{}, errors.New("tags must contain only strings")
-						}
-						raw = append(raw, tag)
-					}
-				} else {
-					return Artifact{}, errors.New("tags must be a list of strings")
-				}
-			}
-			_, normalized, err := NormalizeTags(a.Project, raw)
-			if err != nil {
-				return Artifact{}, err
-			}
-			a.Tags = normalized
-			changed = true
-			sensitive = true
-		case "agent":
-			v, ok := value.(string)
-			if !ok {
-				return Artifact{}, errors.New("agent must be a string")
-			}
-			a.Agent = v
-			changed = true
-		case "kind":
-			v, ok := value.(string)
-			if !ok {
-				return Artifact{}, errors.New("kind must be a string")
-			}
-			a.Kind = v
-			changed = true
-		default:
-			if value == nil {
-				delete(a.Fields, key)
-			} else {
-				a.Fields[key] = value
-			}
-			changed = true
-			sensitive = true
-		}
-	}
-	if !changed {
-		return Artifact{}, errors.New("update contains no fields")
-	}
-	if err := validateFields(a.Fields); err != nil {
-		return Artifact{}, err
-	}
-	a.Project, a.Tags, err = NormalizeTags(a.Project, a.Tags)
-	if err != nil {
-		return Artifact{}, err
-	}
-	hash := sha256.Sum256([]byte(a.Content))
-	a.ContentHash = hex.EncodeToString(hash[:])
-	metadata, err := json.Marshal(a.Fields)
-	if err != nil {
-		return Artifact{}, err
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Artifact{}, err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `UPDATE artifacts SET title=?,content=?,project=?,agent=?,kind=?,content_hash=?,metadata_json=?,tags_json=? WHERE id=?`, a.Title, a.Content, a.Project, a.Agent, a.Kind, a.ContentHash, string(metadata), encodeTags(a.Tags), id)
-	if err != nil {
-		return Artifact{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM artifacts_fts WHERE artifact_id=?`, id); err != nil {
-		return Artifact{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO artifacts_fts(artifact_id,title,content,project,agent) VALUES(?,?,?,?,?)`, id, a.Title, a.Content+" "+string(metadata), a.Project, a.Agent); err != nil {
-		return Artifact{}, err
-	}
-	if oldProject != a.Project {
-		if _, err = bumpRevision(ctx, tx, oldProject); err != nil {
-			return Artifact{}, err
-		}
-	}
-	revision, err := bumpRevision(ctx, tx, a.Project)
-	if err != nil {
-		return Artifact{}, err
-	}
-	if actor == "" {
-		actor = "agent"
-	}
-	if err = logChange(ctx, tx, a.Project, id, "artifact.updated", revision, "Updated "+a.Title, actor, sensitive); err != nil {
-		return Artifact{}, err
-	}
-	if err = tx.Commit(); err != nil {
-		return Artifact{}, err
-	}
-	return a, nil
+	res, err := s.UpdateArtifactWith(ctx, id, patch, UpdateOptions{WriteOptions: WriteOptions{Actor: actor}})
+	return res.Artifact, err
 }
 
+// Search is the agent-facing search. It leaves out kinds registered with
+// exclude_from_memory; the dashboard uses SearchSorted, which shows everything.
 func (s *Store) Search(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
-	return s.SearchSorted(ctx, query, project, limit, "newest")
+	return s.searchSorted(ctx, query, project, limit, "newest", true)
 }
 
 func artifactOrder(sortKey, prefix string) string {
@@ -691,16 +511,19 @@ func artifactOrder(sortKey, prefix string) string {
 }
 
 func (s *Store) SearchSorted(ctx context.Context, query, project string, limit int, sortKey string) ([]Artifact, error) {
+	return s.searchSorted(ctx, query, project, limit, sortKey, false)
+}
+func (s *Store) searchSorted(ctx context.Context, query, project string, limit int, sortKey string, hide bool) ([]Artifact, error) {
 	limit = clampLimit(limit, 50)
 	if strings.TrimSpace(query) == "" {
-		return s.listSorted(ctx, project, limit, sortKey)
+		return s.listSorted(ctx, project, limit, sortKey, hide)
 	}
 	phrase := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
 	rows, err := s.db.QueryContext(ctx, `
-SELECT a.id,a.title,a.content,a.project,a.agent,a.kind,a.content_hash,a.metadata_json,a.tags_json,a.created_at
+SELECT a.id,a.title,a.content,a.project,a.agent,a.kind,a.content_hash,a.metadata_json,a.tags_json,a.created_at,a.updated_at,a.revision,a.seq,a.deleted_at,a.actor,a.batch_id,a.schema_version
 FROM artifacts_fts f JOIN artifacts a ON a.id=f.artifact_id
-WHERE artifacts_fts MATCH ? AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?))
-ORDER BY `+artifactOrder(sortKey, "a.")+` LIMIT ?`, phrase, project, project, project, limit)
+WHERE artifacts_fts MATCH ? AND a.deleted_at IS NULL AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?))
+`+hideInternal("a.", hide)+` ORDER BY `+artifactOrder(sortKey, "a.")+` LIMIT ?`, phrase, project, project, project, limit)
 	if err == nil {
 		defer rows.Close()
 		items, scanErr := scanArtifacts(rows)
@@ -710,7 +533,7 @@ ORDER BY `+artifactOrder(sortKey, "a.")+` LIMIT ?`, phrase, project, project, pr
 	}
 	// Invalid FTS syntax or a query with punctuation still gets a safe literal fallback.
 	like := literalLikePattern(query)
-	return s.listLikeSorted(ctx, like, project, limit, sortKey)
+	return s.listLikeSorted(ctx, like, project, limit, sortKey, hide)
 }
 
 // ArtifactIDs returns IDs matching the same project and full-text filters as
@@ -721,7 +544,7 @@ func (s *Store) ArtifactIDs(ctx context.Context, query, project string) ([]strin
 		return s.artifactIDsLike(ctx, "", project)
 	}
 	phrase := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM artifacts_fts f JOIN artifacts a ON a.id=f.artifact_id WHERE artifacts_fts MATCH ? AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?)) ORDER BY a.created_at DESC`, phrase, project, project, project)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id FROM artifacts_fts f JOIN artifacts a ON a.id=f.artifact_id WHERE artifacts_fts MATCH ? AND a.deleted_at IS NULL AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?)) ORDER BY a.created_at DESC`, phrase, project, project, project)
 	if err == nil {
 		ids, scanErr := scanIDs(rows)
 		_ = rows.Close()
@@ -737,9 +560,9 @@ func (s *Store) artifactIDsLike(ctx context.Context, query, project string) ([]s
 	var rows *sql.Rows
 	var err error
 	if query == "" {
-		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC`, project, project, project)
+		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE deleted_at IS NULL AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC`, project, project, project)
 	} else {
-		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC`, query, query, query, project, project, project)
+		rows, err = s.db.QueryContext(ctx, `SELECT id FROM artifacts WHERE deleted_at IS NULL AND (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC`, query, query, query, project, project, project)
 	}
 	if err != nil {
 		return nil, err
@@ -765,11 +588,11 @@ func scanIDs(rows *sql.Rows) ([]string, error) {
 	return ids, rows.Err()
 }
 
-func (s *Store) list(ctx context.Context, query, project string, limit int) ([]Artifact, error) {
-	return s.listSorted(ctx, project, limit, "newest")
+func (s *Store) list(ctx context.Context, query, project string, limit int, hide bool) ([]Artifact, error) {
+	return s.listSorted(ctx, project, limit, "newest", hide)
 }
-func (s *Store) listSorted(ctx context.Context, project string, limit int, sortKey string) ([]Artifact, error) {
-	sqlText := `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
+func (s *Store) listSorted(ctx context.Context, project string, limit int, sortKey string, hide bool) ([]Artifact, error) {
+	sqlText := `SELECT `+artifactColumns+` FROM artifacts WHERE deleted_at IS NULL AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?))` + hideInternal("", hide) + ` ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, sqlText, project, project, project, limit)
 	if err != nil {
 		return nil, err
@@ -777,8 +600,8 @@ func (s *Store) listSorted(ctx context.Context, project string, limit int, sortK
 	defer rows.Close()
 	return scanArtifacts(rows)
 }
-func (s *Store) listLikeSorted(ctx context.Context, query, project string, limit int, sortKey string) ([]Artifact, error) {
-	sqlText := `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts WHERE (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
+func (s *Store) listLikeSorted(ctx context.Context, query, project string, limit int, sortKey string, hide bool) ([]Artifact, error) {
+	sqlText := `SELECT `+artifactColumns+` FROM artifacts WHERE deleted_at IS NULL AND (title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR metadata_json LIKE ? ESCAPE '\') AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?))` + hideInternal("", hide) + ` ORDER BY ` + artifactOrder(sortKey, "") + ` LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, sqlText, query, query, query, project, project, project, limit)
 	if err != nil {
 		return nil, err
@@ -788,30 +611,17 @@ func (s *Store) listLikeSorted(ctx context.Context, query, project string, limit
 }
 
 func (s *Store) Recent(ctx context.Context, project string, limit int) ([]Artifact, error) {
-	return s.list(ctx, "", project, clampLimit(limit, 50))
+	return s.list(ctx, "", project, clampLimit(limit, 50), true)
 }
 
 func (s *Store) AllArtifacts(ctx context.Context) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,title,content,project,agent,kind,content_hash,metadata_json,tags_json,created_at FROM artifacts ORDER BY created_at ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+artifactColumns+` FROM artifacts WHERE deleted_at IS NULL ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Artifact
-	for rows.Next() {
-		var a Artifact
-		var metadata, tagsJSON, created string
-		if err := rows.Scan(&a.ID, &a.Title, &a.Content, &a.Project, &a.Agent, &a.Kind, &a.ContentHash, &metadata, &tagsJSON, &created); err != nil {
-			return nil, err
-		}
-		a.Fields = decodeFields(metadata)
-		a.Tags = decodeTags(tagsJSON)
-		a.CreatedAt, _ = time.Parse(time.RFC3339Nano, created)
-		out = append(out, a)
-	}
-	return out, rows.Err()
+	return scanArtifacts(rows)
 }
-
 func (s *Store) AllMemory(ctx context.Context) ([]Memory, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,memory_key,body,scope_key,kind,source_id,revision,tags_json,created_at,updated_at FROM memory_items WHERE status='active' ORDER BY created_at ASC`)
 	if err != nil {
@@ -836,23 +646,14 @@ func (s *Store) AllMemory(ctx context.Context) ([]Memory, error) {
 func scanArtifacts(rows *sql.Rows) ([]Artifact, error) {
 	var out []Artifact
 	for rows.Next() {
-		var a Artifact
-		var created, metadata, tagsJSON string
-		if err := rows.Scan(&a.ID, &a.Title, &a.Content, &a.Project, &a.Agent, &a.Kind, &a.ContentHash, &metadata, &tagsJSON, &created); err != nil {
-			return nil, err
-		}
-		var err error
-		a.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		a, err := scanArtifact(rows)
 		if err != nil {
 			return nil, err
 		}
-		a.Fields = decodeFields(metadata)
-		a.Tags = decodeTags(tagsJSON)
 		out = append(out, a)
 	}
 	return out, rows.Err()
 }
-
 func (s *Store) SaveMemory(ctx context.Context, key, body, project, kind, sourceID string, actors ...string) (Memory, error) {
 	return s.SaveMemoryTagged(ctx, key, body, project, kind, sourceID, nil, actors...)
 }
@@ -1138,9 +939,9 @@ func (s *Store) SearchVector(ctx context.Context, model, project string, vector 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.id,a.title,a.content,a.project,a.agent,a.kind,a.content_hash,a.metadata_json,a.tags_json,a.created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT a.id,a.title,a.content,a.project,a.agent,a.kind,a.content_hash,a.metadata_json,a.tags_json,a.created_at,a.updated_at,a.revision,a.seq,a.deleted_at,a.actor,a.batch_id,a.schema_version
 FROM embeddings e JOIN artifacts a ON a.id=e.artifact_id
-WHERE e.model=? AND e.dimensions=? AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?))
+WHERE e.model=? AND e.dimensions=? AND a.deleted_at IS NULL AND (?='' OR a.project=? OR EXISTS (SELECT 1 FROM json_each(a.tags_json) WHERE value=?))
 ORDER BY vec_distance_cos(e.vector_json, ?) ASC LIMIT ?`, model, len(vector), project, project, project, string(q), clampLimit(limit, 30))
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -1153,11 +954,11 @@ func (s *Store) Counts(ctx context.Context) (Counts, error) {
 	var c Counts
 	since := time.Now().UTC().Add(-7 * 24 * time.Hour).Format(time.RFC3339Nano)
 	err := s.db.QueryRowContext(ctx, `SELECT
-	(SELECT count(*) FROM artifacts),
+	(SELECT count(*) FROM artifacts WHERE deleted_at IS NULL),
 	(SELECT count(*) FROM memory_items WHERE status='active'),
 	(SELECT count(*) FROM (
-        SELECT project AS name FROM artifacts WHERE project<>''
-        UNION SELECT j.value FROM artifacts a, json_each(a.tags_json) j
+        SELECT project AS name FROM artifacts WHERE deleted_at IS NULL AND project<>''
+        UNION SELECT j.value FROM artifacts a, json_each(a.tags_json) j WHERE a.deleted_at IS NULL
         UNION SELECT scope_key FROM memory_items WHERE status='active' AND scope_key<>''
         UNION SELECT j.value FROM memory_items m, json_each(m.tags_json) j WHERE m.status='active'
     )),
@@ -1169,9 +970,9 @@ func (s *Store) Counts(ctx context.Context) (Counts, error) {
 
 func (s *Store) ProjectSummaries(ctx context.Context) ([]ProjectSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT name, SUM(results), SUM(memories) FROM (
-		SELECT project AS name, count(*) AS results, 0 AS memories FROM artifacts WHERE project<>'' GROUP BY project
+		SELECT project AS name, count(*) AS results, 0 AS memories FROM artifacts WHERE deleted_at IS NULL AND project<>'' GROUP BY project
         UNION ALL
-        SELECT j.value AS name, count(*) AS results, 0 AS memories FROM artifacts a, json_each(a.tags_json) j GROUP BY j.value
+        SELECT j.value AS name, count(*) AS results, 0 AS memories FROM artifacts a, json_each(a.tags_json) j WHERE a.deleted_at IS NULL GROUP BY j.value
 		UNION ALL
 		SELECT scope_key AS name, 0 AS results, count(*) AS memories FROM memory_items WHERE status='active' AND scope_key<>'' GROUP BY scope_key
         UNION ALL
@@ -1273,7 +1074,7 @@ func (s *Store) WeeklyActivity(ctx context.Context) ([]ActivityDay, error) {
 }
 
 func (s *Store) Describe(ctx context.Context, project string) (map[string]any, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT metadata_json FROM artifacts WHERE (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC LIMIT 500`, project, project, project)
+	rows, err := s.db.QueryContext(ctx, `SELECT metadata_json FROM artifacts WHERE deleted_at IS NULL AND (?='' OR project=? OR EXISTS (SELECT 1 FROM json_each(tags_json) WHERE value=?)) ORDER BY created_at DESC LIMIT 500`, project, project, project)
 	if err != nil {
 		return nil, err
 	}
@@ -1333,4 +1134,27 @@ func clampLimit(n, max int) int {
 		return max
 	}
 	return n
+}
+
+// refuseNewerSchema stops an older Lighthouse from touching a database that a
+// newer one has already upgraded.
+func (s *Store) refuseNewerSchema(ctx context.Context) error {
+	var current int
+	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current); err != nil {
+		return err
+	}
+	if current > schemaVersion {
+		return fmt.Errorf("this database was written by a newer Lighthouse (schema %d, this build understands %d); update Lighthouse before opening it", current, schemaVersion)
+	}
+	return nil
+}
+
+// hideInternal excludes kinds registered with exclude_from_memory. Agents see
+// operational records (Dock tasks, alerts, sync state) only when they ask for
+// the kind directly, so they do not flood search results or context packs.
+func hideInternal(prefix string, hide bool) string {
+	if !hide {
+		return ""
+	}
+	return " AND " + prefix + "kind NOT IN (SELECT kind FROM kinds WHERE exclude_from_memory=1)"
 }

@@ -13,6 +13,15 @@ type Artifact struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	ContentHash string         `json:"content_hash"`
 	Fields      map[string]any `json:"fields,omitempty"`
+	// Envelope fields added in v0.9. They are filled by the store on every
+	// write and ignored when an Artifact is passed in to be saved or imported.
+	UpdatedAt     time.Time  `json:"updated_at"`
+	Revision      int64      `json:"revision"`
+	Seq           int64      `json:"seq"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	Actor         string     `json:"actor,omitempty"`
+	BatchID       string     `json:"batch_id,omitempty"`
+	SchemaVersion int        `json:"schema_version,omitempty"`
 }
 
 type ChangeEvent struct {
