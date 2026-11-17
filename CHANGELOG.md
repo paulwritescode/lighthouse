@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased
+## 0.9.0 — 2026-11-12
+### Added
+- Record every write with a revision, sequence number, actor and timestamp, and keep a global change feed (`changes`, `lighthouse changes --follow`).
+- Add `query`, `save_many`, `update_many`, `batch` and `batch_undo` to the code API, plus links, soft delete, `restore` and `purge`.
+- Add a kind registry with JSON-schema validation (`register_kind`, `lighthouse kind install|list|show|export`).
+- Add a token-protected local HTTP API at `/api/v1/*` with an SSE change stream (`lighthouse token create|list|revoke|rotate`).
+- Add the proposal-only `dock` module and 16 Dock kinds (`lighthouse kind install dock`). Dock kinds are hidden from agent search and context unless `load_memory(include=["dock"])`.
+- Add `lighthouse doctor`, `lighthouse backup`, `lighthouse query` and `code --agent`.
+- Write `api.json` discovery file when serving.
+### Changed
+- Migrate the database to schema version 2 on first open, after an automatic `<db>.bak-v1-<timestamp>` backup. Older binaries refuse the newer schema.
+- Updates that change nothing no longer bump the revision.
+- `search` and context packs return empty lists instead of null.
 
 ## 0.8.1 — 2026-11-11
 

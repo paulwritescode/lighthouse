@@ -214,6 +214,25 @@ Registration adds only a marked Lighthouse block to the OS hosts file. macOS and
 
 The database defaults to the OS user configuration directory. Set `LIGHTHOUSE_DB` or pass `--db /path/to/file.db` to choose another file. Avoid placing a live database in a synced vault or active Git checkout.
 
+## Local HTTP API, tokens and kinds
+
+The dashboard listener also serves a local API at `/api/v1/*` for apps such as Dock. It checks Host, Origin and a bearer token on every request.
+
+```sh
+lighthouse token create --name dock --scope 'read:*' --scope 'write:dock_*'
+lighthouse kind install dock      # registers the Dock kinds and enables the dock module
+lighthouse query --kind dock_task --limit 20
+lighthouse changes --follow       # tail the change feed
+lighthouse doctor                 # integrity checks
+lighthouse backup                 # copy the database
+```
+
+Routes: `health`, `capabilities`, `query`, `records`, `batch`, `batches/{id}/undo`, `changes`, `stream` (SSE), `search`, `kinds`, `links`, `code`. Tokens look like `lh_<id>_<secret>`, are stored hashed, and carry `read:<kind-glob>` / `write:<kind-glob>` scopes. `code` and kind registration need full write.
+
+Every write bumps a `revision`; pass `expected_revision` to avoid lost updates. Deletes are soft through the API. Agents using the `dock` module can only propose records; the user activates them.
+
+Upgrading from 0.8 migrates the database to schema version 2 and first writes a `.bak-v1-<timestamp>` copy next to it. Older binaries refuse to open a migrated database.
+
 ## Import, export, and storage
 
 The dashboard and CLI support JSON, Markdown, YAML, TOML, PDF, and SQLite `.db` transfer. Portable data imports merge records and skip duplicate IDs or memory keys. A `.db` export is a consistent SQLite snapshot; importing a `.db` merges artifacts and active memory rather than replacing the live database. PDF export is a readable report; PDF imports preserve bounded raw source bytes without extracting text.
