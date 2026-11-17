@@ -21,6 +21,8 @@ type Runner struct {
 	Context context.Context
 	Project string
 	Session string
+	// Actor labels every write, for example "agent:kiro". Empty means "agent".
+	Actor string
 }
 
 // Run executes a small Starlark program with database capabilities only. It
@@ -45,6 +47,19 @@ func (r Runner) Run(ctx context.Context, src, session, project string, out io.Wr
 		"save":          starlark.NewBuiltin("save", r.save),
 		"update":        starlark.NewBuiltin("update", r.update),
 		"delete":        starlark.NewBuiltin("delete", r.deleteArtifact),
+		"restore":       starlark.NewBuiltin("restore", r.restore),
+		"purge":         starlark.NewBuiltin("purge", r.purge),
+		"query":         starlark.NewBuiltin("query", r.query),
+		"save_many":     starlark.NewBuiltin("save_many", r.saveMany),
+		"update_many":   starlark.NewBuiltin("update_many", r.updateMany),
+		"batch":         starlark.NewBuiltin("batch", r.batch),
+		"batch_undo":    starlark.NewBuiltin("batch_undo", r.batchUndo),
+		"changes":       starlark.NewBuiltin("changes", r.changes),
+		"link":          starlark.NewBuiltin("link", r.link),
+		"unlink":        starlark.NewBuiltin("unlink", r.unlink),
+		"links":         starlark.NewBuiltin("links", r.links),
+		"register_kind": starlark.NewBuiltin("register_kind", r.registerKind),
+		"dock":          r.dockModule(),
 		"load_memory":   starlark.NewBuiltin("load_memory", r.loadMemory),
 		"upsert_memory": starlark.NewBuiltin("upsert_memory", r.upsertMemory),
 		"delete_memory": starlark.NewBuiltin("delete_memory", r.deleteMemory),
@@ -97,6 +112,10 @@ func (r Runner) search(t *starlark.Thread, b *starlark.Builtin, args starlark.Tu
 	if err != nil {
 		return nil, err
 	}
+	if items == nil {
+		// An empty result is an empty list, so scripts can loop over it or take len().
+		items = []store.Artifact{}
+	}
 	return toStarlark(items)
 }
 func (r Runner) get(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
@@ -109,32 +128,6 @@ func (r Runner) get(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple
 		return nil, err
 	}
 	return toStarlark(a)
-}
-func (r Runner) save(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var title, content, project, agent, kind string
-	var fields *starlark.Dict
-	var tags *starlark.List
-	agent = "agent"
-	kind = "result"
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "title", &title, "content", &content, "project?", &project, "agent?", &agent, "kind?", &kind, "fields?", &fields, "tags?", &tags); err != nil {
-		return nil, err
-	}
-	if project == "" {
-		project = r.Project
-	}
-	custom, err := fieldsMap(fields)
-	if err != nil {
-		return nil, err
-	}
-	tagNames, err := starlarkTags(tags)
-	if err != nil {
-		return nil, err
-	}
-	a, err := r.Store.SaveArtifactTagged(r.Context, title, content, project, agent, kind, custom, tagNames)
-	if err != nil {
-		return nil, err
-	}
-	return r.writeResponse(map[string]any{"artifact": a}, project)
 }
 
 func fieldsMap(d *starlark.Dict) (map[string]any, error) {
@@ -152,38 +145,6 @@ func fieldsMap(d *starlark.Dict) (map[string]any, error) {
 	return out, nil
 }
 
-func (r Runner) update(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var id string
-	var fields *starlark.Dict
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "id", &id, "fields", &fields); err != nil {
-		return nil, err
-	}
-	patch, err := fieldsMap(fields)
-	if err != nil {
-		return nil, err
-	}
-	a, err := r.Store.UpdateArtifact(r.Context, id, patch, "agent")
-	if err != nil {
-		return nil, err
-	}
-	return r.writeResponse(map[string]any{"artifact": a}, a.Project)
-}
-
-func (r Runner) deleteArtifact(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var id string
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "id", &id); err != nil {
-		return nil, err
-	}
-	a, err := r.Store.GetArtifact(r.Context, id)
-	if err != nil {
-		return nil, err
-	}
-	if err = r.Store.DeleteArtifact(r.Context, id, "agent"); err != nil {
-		return nil, err
-	}
-	return r.writeResponse(map[string]any{"deleted_id": id}, a.Project)
-}
-
 func (r Runner) deleteMemory(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var id, project string
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "id", &id, "project?", &project); err != nil {
@@ -198,21 +159,6 @@ func (r Runner) deleteMemory(t *starlark.Thread, b *starlark.Builtin, args starl
 	return r.writeResponse(map[string]any{"deleted_memory_id": id}, project)
 }
 
-func (r Runner) describe(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var project string
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "project?", &project); err != nil {
-		return nil, err
-	}
-	if project == "" {
-		project = r.Project
-	}
-	v, err := r.Store.Describe(r.Context, project)
-	if err != nil {
-		return nil, err
-	}
-	return toStarlark(v)
-}
-
 func (r Runner) audit(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	limit := 25
 	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "limit?", &limit); err != nil {
@@ -223,24 +169,6 @@ func (r Runner) audit(t *starlark.Thread, b *starlark.Builtin, args starlark.Tup
 		return nil, err
 	}
 	return toStarlark(v)
-}
-func (r Runner) loadMemory(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-	var project, session string
-	limit := 10
-	if err := starlark.UnpackArgs(b.Name(), args, kwargs, "project?", &project, "session?", &session, "limit?", &limit); err != nil {
-		return nil, err
-	}
-	if project == "" {
-		project = r.Project
-	}
-	if session == "" {
-		session = r.Session
-	}
-	p, err := r.Store.LoadContext(r.Context, session, project, limit)
-	if err != nil {
-		return nil, err
-	}
-	return toStarlark(p)
 }
 func (r Runner) upsertMemory(t *starlark.Thread, b *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 	var key, body, project, kind, source string

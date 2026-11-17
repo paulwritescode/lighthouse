@@ -1158,3 +1158,6 @@ func hideInternal(prefix string, hide bool) string {
 	}
 	return " AND " + prefix + "kind NOT IN (SELECT kind FROM kinds WHERE exclude_from_memory=1)"
 }
+
+// NewID returns a fresh record identifier (32 lowercase hex characters).
+func NewID() (string, error) { return newID() }
