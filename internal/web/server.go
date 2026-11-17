@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/paulwritescode/lighthouse/internal/api"
 	"github.com/paulwritescode/lighthouse/internal/store"
 	"github.com/paulwritescode/lighthouse/internal/transfer"
 	"github.com/yuin/goldmark"
@@ -47,6 +48,7 @@ type Server struct {
 	dbPath         string
 	csrf           string
 	tmpl           *template.Template
+	api            http.Handler
 }
 
 type pageData struct {
@@ -112,7 +114,9 @@ func newWithCSRFPath(s *store.Store, dbPath, csrfPath string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{store: s, dbPath: dbPath, csrf: token, tmpl: t, authorizeReset: authorizeMacReset}, nil
+	srv := &Server{store: s, dbPath: dbPath, csrf: token, tmpl: t, authorizeReset: authorizeMacReset}
+	srv.api = api.New(srv.currentStore).Handler()
+	return srv, nil
 }
 
 func loadCSRFToken(path string) (string, error) {
@@ -164,6 +168,12 @@ func loadCSRFToken(path string) (string, error) {
 	return value, nil
 }
 
+func (s *Server) currentStore() *store.Store {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.store
+}
+
 // Close releases the active store, including one reopened after database deletion.
 func (s *Server) Close() error {
 	s.mu.Lock()
@@ -200,6 +210,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(mustSub(assets, "static"))))
 	inner := s.localOnly(mux)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The typed API does its own host, origin and bearer-token checks, and
+		// its event stream is long-lived, so it must not hold the dashboard lock.
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			s.api.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/data/erase" && r.Method == http.MethodPost {
 			s.mu.Lock()
 			defer s.mu.Unlock()

@@ -474,6 +474,12 @@ func (r Runner) loadMemory(t *starlark.Thread, b *starlark.Builtin, args starlar
 	if err != nil {
 		return nil, err
 	}
+	if p.Artifacts == nil {
+		p.Artifacts = []store.Artifact{}
+	}
+	if p.Memories == nil {
+		p.Memories = []store.Memory{}
+	}
 	v, err := toStarlark(p)
 	if err != nil {
 		return nil, err

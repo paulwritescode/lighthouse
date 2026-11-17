@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/paulwritescode/lighthouse"
+	"github.com/paulwritescode/lighthouse/internal/api"
 	"github.com/paulwritescode/lighthouse/internal/codecall"
 	"github.com/paulwritescode/lighthouse/internal/hostname"
 	"github.com/paulwritescode/lighthouse/internal/service"
@@ -121,6 +122,18 @@ func run(args []string) error {
 		return exportData(s, ctx, commandArgs)
 	case "import":
 		return importData(s, ctx, commandArgs)
+	case "query":
+		return queryCommand(s, ctx, commandArgs)
+	case "changes":
+		return changesCommand(s, ctx, commandArgs)
+	case "token":
+		return tokenCommand(s, ctx, commandArgs)
+	case "kind":
+		return kindCommand(s, ctx, commandArgs)
+	case "doctor":
+		return doctorCommand(s, ctx, path)
+	case "backup":
+		return backupCommand(s, ctx, path, commandArgs)
 	case "update", "self-update":
 		return updater.Update(ctx, path)
 	default:
@@ -128,7 +141,7 @@ func run(args []string) error {
 	}
 }
 
-const usageText = "Commands: setup, menu, init, serve, service, host, add, search, context, code, export, import, version, update\nUse lighthouse <command> --help for command options. Running `lighthouse` opens first-time setup or the interactive menu."
+const usageText = "Commands: setup, menu, init, serve, service, host, add, search, context, code, query, changes, token, kind, doctor, backup, export, import, version, update\nUse lighthouse <command> --help for command options. Running `lighthouse` opens first-time setup or the interactive menu."
 
 func usage() error { fmt.Println("Lighthouse — local agent knowledge\n\n" + usageText); return nil }
 
@@ -457,6 +470,14 @@ func serve(s *store.Store, path string, args []string) error {
 	defer handler.Close()
 	addr := fmt.Sprintf("%s:%d", *host, *port)
 	srv := &http.Server{Addr: addr, Handler: handler.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	if dir, err := os.UserConfigDir(); err == nil {
+		discovery := api.DiscoveryPath(dir)
+		if err := api.WriteDiscovery(discovery, addr); err != nil {
+			fmt.Fprintln(os.Stderr, "lighthouse: could not write", discovery+":", err)
+		} else {
+			defer os.Remove(discovery)
+		}
+	}
 	friendly := "http://lighthouse.localhost:" + fmt.Sprint(*port)
 	fmt.Printf("Lighthouse listening on http://%s (friendly address: %s)\nDatabase: %s\nPress Ctrl+C to stop.\n", addr, friendly, path)
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), terminationSignals()...)
@@ -530,12 +551,13 @@ func loadContext(s *store.Store, ctx context.Context, args []string) error {
 }
 func runCode(s *store.Store, ctx context.Context, args []string) error {
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
-		fmt.Println("Usage: lighthouse code [--project NAME] [--session ID] < script.star\n\nRuns one bounded Starlark code call. Available functions:\n  load_memory(project=\"\", session=\"\", limit=10)\n  search(query, project=\"\", limit=10)\n  get(id)\n  describe(project=\"\")\n  audit(limit=25)\n  save(title, content, project=\"\", agent=\"agent\", kind=\"result\", fields={})\n  update(id, fields={...})\n  delete(id)\n  upsert_memory(key, body, project=\"\", kind=\"fact\", source_id=\"\")\n  delete_memory(id, project=\"\")\n  emit(value)\n\nWrites return the committed item and a refreshed context patch. Custom fields are JSON document properties; SQL schema changes are not available.")
+		fmt.Println("Usage: lighthouse code [--project NAME] [--session ID] [--agent NAME] < script.star\n\nRuns one bounded Starlark code call. Available functions:\n  load_memory(project=\"\", session=\"\", limit=10, include=[])   include=[\"dock\"] adds today's Dock agenda\n  search(query, project=\"\", limit=10)\n  get(id)\n  query(kind=\"\", project=\"\", where={}, order=[], select=[], limit=50, cursor=\"\", include_deleted=False, count=False)\n  describe(project=\"\", kind=\"\")\n  audit(limit=25)\n  changes(since=0, limit=500, kinds=[], projects=[], actors_not=[])\n  save(title, content, project=\"\", agent=\"agent\", kind=\"result\", fields={}, tags=[], id=\"\", batch_id=\"\")\n  update(id, fields={...}, if_revision=None, merge=\"shallow\", unset=[], batch_id=\"\")\n  save_many(items, batch_id=\"\", atomic=True)   update_many(updates, ...)   batch(ops, ...)   batch_undo(batch_id)\n  delete(id, soft=False)   restore(id)   purge(id=\"\", older_than_days=-1)\n  link(from_id, rel, to_id, meta={})   unlink(from_id, rel, to_id)   links(id, rel=\"\", direction=\"both\")\n  register_kind(kind, schema={}, indexes=[], version=1, exclude_from_memory=False, validation=\"enforce\")\n  upsert_memory(key, body, project=\"\", kind=\"fact\", source_id=\"\")\n  delete_memory(id, project=\"\")\n  dock.*   proposal-only helpers for the Dock app (run `lighthouse kind install dock` first)\n  emit(value)\nWrites return the committed item and a refreshed context patch. Custom fields are JSON document properties; SQL schema changes are not available.")
 		return nil
 	}
 	f := flag.NewFlagSet("code", flag.ContinueOnError)
 	project := f.String("project", "", "default project scope")
 	session := f.String("session", "", "conversation identifier")
+	agent := f.String("agent", "", "name of the calling agent, recorded as the actor of every write")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -546,7 +568,11 @@ func runCode(s *store.Store, ctx context.Context, args []string) error {
 	if len(src) > 64<<10 {
 		return errors.New("stdin exceeds 64 KiB")
 	}
-	return (codecall.Runner{Store: s}).Run(ctx, string(src), *session, *project, os.Stdout)
+	actor := ""
+	if *agent != "" {
+		actor = "agent:" + strings.ToLower(strings.TrimSpace(*agent))
+	}
+	return (codecall.Runner{Store: s, Actor: actor}).Run(ctx, string(src), *session, *project, os.Stdout)
 }
 
 func exportData(s *store.Store, ctx context.Context, args []string) error {
